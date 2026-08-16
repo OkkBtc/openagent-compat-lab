@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-compat-lab"
+name = "openagent-compat-lab"
 version = "0.2.0"
 description = "Deterministic compatibility checks for Codex, Hermes, OpenClaw, and OpenAI-style LLM endpoints"
 requires-python = ">=3.10"
@@ -22,9 +22,9 @@ agent-compat = "mcs.cli:main"
 mcs = "mcs.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/OkkBtc/agent-compat-lab"
-Issues = "https://github.com/OkkBtc/agent-compat-lab/issues"
-Source = "https://github.com/OkkBtc/agent-compat-lab"
+Homepage = "https://github.com/OkkBtc/openagent-compat-lab"
+Issues = "https://github.com/OkkBtc/openagent-compat-lab/issues"
+Source = "https://github.com/OkkBtc/openagent-compat-lab"
 
 [tool.setuptools.packages.find]
 include = ["mcs*"]

@@ -1,1 +1,1 @@
-"""Agent Compat Lab protocol and model compatibility checks."""
+"""openagent-compat-lab protocol and model compatibility checks."""

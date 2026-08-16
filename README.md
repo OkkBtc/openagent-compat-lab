@@ -1,12 +1,12 @@
-# Agent Compat Lab
+# openagent-compat-lab
 
 **Test whether an “OpenAI-compatible” endpoint actually works with Codex,
 Hermes Agent, and OpenClaw before you trust it with a real task.**
 
-Agent Compat Lab runs a small, deterministic protocol test from your machine and
-returns a compatibility matrix, JSON, or a shareable Markdown report. It checks
-wire behavior—not benchmark quality—and exits non-zero when a required behavior
-is missing.
+openagent-compat-lab runs a small, deterministic protocol test from your machine
+and returns a compatibility matrix, JSON, or a shareable Markdown report. It
+checks wire behavior—not benchmark quality—and exits non-zero when a required
+behavior is missing.
 
 ```text
 Agent compatibility matrix for provider/model-name
@@ -32,9 +32,24 @@ response. Agents depend on more fragile protocol details:
 - structured-output fields that differ between Chat Completions and Responses;
 - correct SSE termination and non-text inputs.
 
-Agent Compat Lab exercises those paths with fixed prompts and fake local tool
+openagent-compat-lab exercises those paths with fixed prompts and fake local tool
 results. It never executes a shell command, reads your repository, or calls a
 real order/weather service.
+
+## What this project adds beyond upstream
+
+This is a focused derivative, not an unchanged mirror. The upstream suite tests
+broad model behavior; openagent-compat-lab adds an agent-integration acceptance
+layer:
+
+- distinct Codex, Hermes, and OpenClaw protocol profiles;
+- stateful tool-result round trips instead of stopping at the first tool call;
+- Responses `call_id` pairing and `previous_response_id` continuation;
+- strict Chat Completions assistant/tool/assistant role ordering;
+- streamed parallel tool-call reconstruction by index and ID;
+- a one-command three-agent compatibility matrix;
+- per-check timing plus JSON and Markdown evidence reports;
+- credential redaction, explicit no-auth mode, and offline regression tests.
 
 ## Profiles
 
@@ -61,8 +76,8 @@ quality, every feature of the named agent, provider uptime, or production safety
 Requires Python 3.10 or newer.
 
 ```bash
-git clone https://github.com/OkkBtc/agent-compat-lab.git
-cd agent-compat-lab
+git clone https://github.com/OkkBtc/openagent-compat-lab.git
+cd openagent-compat-lab
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
@@ -255,7 +270,7 @@ failure is reproducible.
 
 ## Origin and license
 
-Agent Compat Lab is derived from
+openagent-compat-lab is derived from
 [`swiss-ai/model-compatibility-suite`](https://github.com/swiss-ai/model-compatibility-suite)
 at commit
 [`531a52813d9be66d9fdf13c6a9d30875a770df66`](https://github.com/swiss-ai/model-compatibility-suite/commit/531a52813d9be66d9fdf13c6a9d30875a770df66).

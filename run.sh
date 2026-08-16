@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Bootstrap + run Agent Compat Lab against an OpenAI-style API.
+# Bootstrap + run openagent-compat-lab against an OpenAI-style API.
 #
 # Runs deterministic agent protocol checks and exits non-zero on failure.
 #
 # Remote:
 #   export ACL_API_KEY=...   # bearer token
-#   curl -fsSL https://raw.githubusercontent.com/OkkBtc/agent-compat-lab/main/run.sh | \
+#   curl -fsSL https://raw.githubusercontent.com/OkkBtc/openagent-compat-lab/main/run.sh | \
 #     bash -s -- --profile codex --base-url <url> --model <id>
 #
 # Inside a checkout (skip the git install, use the local tree):
@@ -14,7 +14,7 @@
 # Config via env: ACL_API_BASE, ACL_API_KEY, ACL_MODEL, ACL_TIMEOUT.
 set -euo pipefail
 
-REPO="${ACL_REPO:-https://github.com/OkkBtc/agent-compat-lab}"
+REPO="${ACL_REPO:-https://github.com/OkkBtc/openagent-compat-lab}"
 REF="${ACL_REF:-main}"
 LOCAL=0
 ARGS=()
@@ -39,14 +39,14 @@ pip install --quiet --upgrade pip
 
 # Install from git by default. Only use the local tree with an explicit --local
 # (otherwise a stray ./pyproject.toml in the CWD -- e.g. another project -- would
-# get installed instead of Agent Compat Lab).
+# get installed instead of openagent-compat-lab).
 if [ "$LOCAL" -eq 1 ]; then
   pip install --quiet -e ".[dev]"
 else
-  pip install --quiet "agent-compat-lab @ git+${REPO}@${REF}"
+  pip install --quiet "openagent-compat-lab @ git+${REPO}@${REF}"
 fi
 
-echo "Running Agent Compat Lab..."
+echo "Running openagent-compat-lab..."
 set +e
 # `${ARGS[@]+...}` guards against the macOS bash 3.2 "unbound variable" error
 # when ARGS is empty under `set -u`.

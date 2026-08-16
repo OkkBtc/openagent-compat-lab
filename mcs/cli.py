@@ -1,4 +1,4 @@
-"""Console entrypoint for Agent Compat Lab."""
+"""Console entrypoint for openagent-compat-lab."""
 
 import argparse
 import dataclasses

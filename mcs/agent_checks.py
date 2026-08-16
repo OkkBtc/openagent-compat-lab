@@ -496,7 +496,7 @@ def _summary(results: list[Result]) -> dict:
 def _markdown(config: Config, profile: str, results: list[Result]) -> str:
     summary = _summary(results)
     lines = [
-        "# Agent Compat Lab report",
+        "# openagent-compat-lab report",
         "",
         f"- Profile: `{profile}`",
         f"- Model: `{_safe_model(config)}`",
@@ -528,7 +528,7 @@ def _matrix_markdown(config: Config, runs: dict[str, list[Result]]) -> str:
         "openclaw": "Chat Completions stream",
     }
     lines = [
-        "# Agent Compat Lab matrix",
+        "# openagent-compat-lab matrix",
         "",
         f"- Model: `{_safe_model(config)}`",
         f"- Endpoint: `{_safe_endpoint(config)}`",

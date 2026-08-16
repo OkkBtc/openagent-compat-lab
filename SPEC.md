@@ -2,8 +2,8 @@
 
 > This document describes the full model suite inherited from
 > `swiss-ai/model-compatibility-suite` at commit
-> `531a52813d9be66d9fdf13c6a9d30875a770df66`. Agent Compat Lab's focused agent
-> profiles and current usage are documented in `README.md`.
+> `531a52813d9be66d9fdf13c6a9d30875a770df66`. openagent-compat-lab's focused
+> agent profiles and current usage are documented in `README.md`.
 
 > Handoff spec. This document is authoritative: another engineer (human or
 > Claude) should be able to implement the full suite from this file alone.

@@ -329,7 +329,7 @@ def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_p
     ]
     assert all(row["compatible"] for row in payload["matrix"])
     markdown = report.read_text()
-    assert "Agent Compat Lab matrix" in markdown
+    assert "openagent-compat-lab matrix" in markdown
     assert "responses_tool_result_roundtrip" in markdown
     assert "openclaw_streamed_parallel_tools" in markdown
 
