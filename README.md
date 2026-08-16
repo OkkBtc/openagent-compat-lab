@@ -68,8 +68,9 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Keep the provider key in an environment variable so it does not appear in the
-process list or command history:
+Keep the provider key in an environment variable so it does not appear as a CLI
+argument. Load real keys with your shell's secret manager or a non-echoing
+prompt if shell-history retention is a concern:
 
 ```bash
 export ACL_API_KEY="your-provider-key"
