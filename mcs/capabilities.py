@@ -35,6 +35,7 @@ class Result:
     name: str  # check name, e.g. "tools_parallel"
     status: str
     detail: str = ""
+    duration_ms: float = 0.0
 
 
 def _check_name(nodeid: str) -> str:

@@ -16,7 +16,7 @@ _CAPABILITIES = [
     "robustness",
     "perf",
 ]
-_PROFILES = ["generic", "codex", "hermes", "openclaw", "model"]
+_PROFILES = ["generic", "codex", "hermes", "openclaw", "all", "model"]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -118,11 +118,13 @@ def main(argv=None) -> int:
             parser.error(
                 "--capability/--junit/--detail/--spec apply only to --profile model"
             )
-        from .agent_checks import report_agent
+        from .agent_checks import report_agent, report_agent_matrix
 
-        return report_agent(
+        report = report_agent_matrix if args.profile == "all" else report_agent
+        report_args = () if args.profile == "all" else (args.profile,)
+        return report(
             config,
-            args.profile,
+            *report_args,
             as_json=args.json,
             markdown_path=args.markdown,
         )

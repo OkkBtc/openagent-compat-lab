@@ -1,26 +1,60 @@
 # Agent Compat Lab
 
-Find out whether an “OpenAI-compatible” LLM endpoint actually works with
-**Codex**, **Hermes**, **OpenClaw**, or a generic tool-using agent.
+**Test whether an “OpenAI-compatible” endpoint actually works with Codex,
+Hermes Agent, and OpenClaw before you trust it with a real task.**
 
-Agent Compat Lab sends a small deterministic probe set directly from your
-machine to the endpoint, then produces a pass/fail table, JSON, or Markdown.
-It tests protocol behavior—not answer quality—and exits non-zero when a required
-behavior is missing.
+Agent Compat Lab runs a small, deterministic protocol test from your machine and
+returns a compatibility matrix, JSON, or a shareable Markdown report. It checks
+wire behavior—not benchmark quality—and exits non-zero when a required behavior
+is missing.
 
-## What it checks
+```text
+Agent compatibility matrix for provider/model-name
+  endpoint: https://provider.example/v1
 
-| Profile | API path | Checks |
+  profile    passed  failed  duration     verdict
+  ---------- ------- ------- ------------ ----------
+  codex       8/8          0   1842.6 ms   compatible
+  hermes      8/8          0   1604.1 ms   compatible
+  openclaw    8/8          0   1719.8 ms   compatible
+```
+
+## Why this exists
+
+A successful `curl /chat/completions` proves only that one request returned a
+response. Agents depend on more fragile protocol details:
+
+- exact tool-call IDs and JSON arguments;
+- assistant → tool → assistant role ordering;
+- a second turn that consumes the tool result instead of calling the tool again;
+- streamed tool-call fragments that must be merged by index;
+- Responses API typed items, `call_id`, and `previous_response_id`;
+- structured-output fields that differ between Chat Completions and Responses;
+- correct SSE termination and non-text inputs.
+
+Agent Compat Lab exercises those paths with fixed prompts and fake local tool
+results. It never executes a shell command, reads your repository, or calls a
+real order/weather service.
+
+## Profiles
+
+The named profiles are intentionally different—not labels over the same tests.
+
+| Profile | API path | Protocol-specific coverage |
 |---|---|---|
-| `generic` | Chat Completions | models/auth, basic response, SSE `[DONE]`, forced tools, optional argument semantics, JSON Schema, image `detail: original` |
-| `hermes` | Chat Completions | the same focused checks under a Hermes-labelled report |
-| `openclaw` | Chat Completions | the same focused checks under an OpenClaw-labelled report |
-| `codex` | Responses API | models/auth, basic response, `response.completed`, forced tools, optional argument semantics, JSON Schema, `input_image` with `detail: original` |
-| `model` | Chat Completions + optional extensions | the full upstream Model Compatibility Suite |
+| `codex` | Responses API | typed output items, `response.completed`, forced function calls, `function_call_output` paired by `call_id`, and continuation through `previous_response_id` |
+| `hermes` | Chat Completions | strict `assistant(tool_calls) → tool(tool_call_id) → assistant(text)` round trip and `finish_reason: tool_calls` |
+| `openclaw` | Chat Completions | two parallel tool calls streamed in fragments and reconstructed by `index`, ID, name, and JSON arguments |
+| `generic` | Chat Completions | fast baseline for models, text, SSE `[DONE]`, tools, optional arguments, JSON Schema, and image detail |
+| `all` | Three named-agent paths | runs `codex`, `hermes`, and `openclaw`, then emits one compatibility matrix |
+| `model` | Upstream full suite | retains the broader Model Compatibility Suite for model-level conformance |
 
-The agent profiles intentionally contain seven fast checks. They do not claim
-that every feature of an agent is supported; they catch the protocol gaps that
-most often break setup before a real task starts.
+Every named-agent profile also verifies `GET /models`, basic text generation,
+forced tools, omission of an optional tool argument, strict JSON Schema output,
+stream termination, and a 1×1 inline image with `detail: original`.
+
+Passing means the tested paths worked at that moment. It does not certify answer
+quality, every feature of the named agent, provider uptime, or production safety.
 
 ## Quick start
 
@@ -34,27 +68,38 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Set credentials in the environment so they do not enter shell history:
+Keep the provider key in an environment variable so it does not appear in the
+process list or command history:
 
 ```bash
 export ACL_API_KEY="your-provider-key"
 
 agent-compat \
-  --profile hermes \
+  --profile all \
   --base-url https://provider.example/v1 \
   --model provider/model-name
 ```
 
-For Codex's Responses API path:
+The base URL should be the API root to which `/models`, `/chat/completions`, and
+`/responses` can be appended. For most providers it ends in `/v1`.
+
+Run only one integration when you already know the target agent:
 
 ```bash
-agent-compat \
-  --profile codex \
-  --base-url https://provider.example/v1 \
-  --model provider/model-name
+agent-compat --profile codex \
+  --base-url "$BASE_URL" \
+  --model "$MODEL"
+
+agent-compat --profile hermes \
+  --base-url "$BASE_URL" \
+  --model "$MODEL"
+
+agent-compat --profile openclaw \
+  --base-url "$BASE_URL" \
+  --model "$MODEL"
 ```
 
-For a local endpoint that intentionally has no authentication:
+For a local endpoint that intentionally has no bearer token:
 
 ```bash
 agent-compat \
@@ -64,71 +109,96 @@ agent-compat \
   --allow-no-auth
 ```
 
-`--allow-no-auth` is explicit by design; a missing key otherwise stops before
-any network request is sent.
+An empty key is rejected unless `--allow-no-auth` is explicit. This catches a
+surprisingly common configuration mistake before any request is sent.
 
-## Reports and automation
+## Reports and CI
 
 Print machine-readable JSON:
 
 ```bash
-agent-compat --profile codex --base-url "$BASE_URL" --model "$MODEL" --json
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --json > compat.json
 ```
 
-Write a shareable Markdown report while keeping the console table:
+The JSON contains a matrix summary, every check's status and failure detail, and
+`duration_ms` at both check and profile level.
+
+Write a Markdown report while keeping the console matrix:
 
 ```bash
-agent-compat \
-  --profile openclaw \
+agent-compat --profile all \
   --base-url "$BASE_URL" \
   --model "$MODEL" \
   --markdown compat-report.md
 ```
 
-The process exits with `0` only when every check passes. This makes it suitable
-for CI, provider acceptance, and regression checks.
+Exit status is `0` only when every selected check passes. `FAIL` means the
+endpoint returned a valid response that violated the asserted contract;
+`BROKEN` means transport, HTTP, JSON, or another runtime error prevented the
+contract from being evaluated. Either produces exit status `1`.
 
-Optional redacted wire records can help diagnose a failed provider:
+Optional redacted wire records make provider debugging easier:
 
 ```bash
-agent-compat \
-  --profile hermes \
+agent-compat --profile hermes \
   --base-url "$BASE_URL" \
   --model "$MODEL" \
   --record-responses ./compat-wire
 ```
 
-The destination must not already exist. Authorization headers are never
-recorded, and known credentials are removed from bodies and errors.
+The destination must not already exist. Files are grouped by profile and check,
+and multi-request round trips are recorded in order. Known credentials,
+authorization values, URL user-info, and common secret query parameters are
+redacted. Treat wire records as sensitive anyway: a provider could echo data
+that the redactor does not know is private.
 
 ## Configuration
 
-Command-line values take precedence by being copied into the same environment
-configuration used by the checks.
+Flags are copied into the same environment-backed configuration used by every
+probe.
 
 | Variable | Meaning |
 |---|---|
 | `ACL_API_BASE` | API root, usually ending in `/v1` |
-| `ACL_API_KEY` | bearer token |
-| `ACL_MODEL` | exact model id expected from `GET /models` |
-| `ACL_TIMEOUT` | request timeout in seconds; default `60` |
+| `ACL_API_KEY` | bearer token; no CLI key flag is provided intentionally |
+| `ACL_MODEL` | exact model ID expected from `GET /models` |
+| `ACL_TIMEOUT` | per-request timeout in seconds; default `60` |
 
 Legacy `MCS_*` variables and `CSCS_SERVING_API` remain supported for the
-inherited full model suite. The old `mcs` executable is also retained as an
-alias, but new usage should call `agent-compat`.
+inherited suite. The old `mcs` executable is retained as an alias, but new usage
+should call `agent-compat`.
+
+## Requests, privacy, and billing
+
+- Requests travel directly from your computer to the base URL you provide.
+- The project has no telemetry, hosted backend, account system, or report upload.
+- API keys are read from the environment and Authorization headers are never
+  written to wire records.
+- No automatic retries are performed, so a failure is not silently hidden and a
+  probe is not unexpectedly billed twice.
+- A successful `all` run makes 26 HTTP requests: 23 small model generations and
+  three `/models` reads. A failing run can stop individual round trips early.
+- Prompts, a fake tool schema/result, and one tiny inline test image are sent to
+  the provider. Review that provider's retention and privacy terms first.
+- Providers may charge for every generation. Check their current pricing and
+  rate limits before running a matrix repeatedly in CI.
+
+The tool schemas use invented order and weather data. Do not replace them with
+production secrets when filing an issue.
 
 ## Full model suite
 
 The upstream deterministic model conformance suite remains available:
 
 ```bash
-agent-compat \
-  --profile model \
+agent-compat --profile model \
   --base-url "$BASE_URL" \
   --model "$MODEL"
 
-agent-compat \
-  --profile model \
+agent-compat --profile model \
   --base-url "$BASE_URL" \
   --model "$MODEL" \
   --capability tools,streaming
@@ -136,6 +206,22 @@ agent-compat \
 
 Use `--spec dev` only for servers that expose non-standard `/tokenize` and
 `/detokenize` endpoints. See [SPEC.md](SPEC.md) for the inherited suite design.
+
+## Troubleshooting
+
+| Symptom | Likely meaning |
+|---|---|
+| target model is not listed | the configured model ID differs from `/models`, or the endpoint filters visibility by key |
+| stream ended without `[DONE]` | Chat Completions SSE framing is incomplete |
+| no `response.completed` | the Responses stream did not emit the required typed completion event |
+| tool result produced another tool call | the endpoint did not consume the assistant/tool history correctly |
+| `call_id`/`previous_response_id` error | the endpoint implements only part of the Responses continuation contract |
+| JSON decode failure in streamed tools | tool argument fragments were missing, reordered, or malformed |
+| HTTP 404 on `/responses` | the provider likely supports Chat Completions only; test `hermes`, `openclaw`, or `generic` separately |
+
+Use `--record-responses` with a new directory when the one-line detail is not
+enough. Reports and errors cap long provider bodies to keep accidental leakage
+small.
 
 ## Development
 
@@ -151,20 +237,20 @@ pytest mcs/suites --collect-only -q
 python -m build
 ```
 
-All agent-profile tests use a local standard-library HTTP mock; development and
-CI do not need a real provider key.
+The focused agent tests use a local standard-library HTTP server and need no
+network connection or real provider key. CI runs lint, all offline agent tests,
+full-suite collection, and wheel/source-distribution builds.
 
-## Security and privacy
+## Scope and roadmap
 
-- Requests go directly from your machine to the base URL you provide.
-- The project has no telemetry and does not upload reports.
-- API keys are read from environment variables, not command-line flags.
-- Known keys, authorization values, URL user-info, and common secret query
-  parameters are redacted from errors and reports.
-- A real endpoint receives the small prompts, tool schema, and 1×1 inline test
-  image described by the checks above.
+The project deliberately stays small: deterministic protocol acceptance, clear
+evidence, and safe diagnostics. It is not an agent runtime or a benchmark
+leaderboard. Good next additions should come with a reproducible provider gap
+and an offline regression test.
 
-Review an endpoint's privacy and billing terms before testing it.
+Issues and focused pull requests are welcome. Please include the selected
+profile, redacted failure detail, provider/model identifier, and whether the
+failure is reproducible.
 
 ## Origin and license
 
@@ -172,5 +258,8 @@ Agent Compat Lab is derived from
 [`swiss-ai/model-compatibility-suite`](https://github.com/swiss-ai/model-compatibility-suite)
 at commit
 [`531a52813d9be66d9fdf13c6a9d30875a770df66`](https://github.com/swiss-ai/model-compatibility-suite/commit/531a52813d9be66d9fdf13c6a9d30875a770df66).
-The Apache-2.0 license and upstream notices are preserved. See [NOTICE](NOTICE)
-for the modification summary.
+
+The upstream Apache-2.0 license and notices are preserved. Agent-specific
+profiles, stateful tool round trips, Responses API probes, the compatibility
+matrix, credential redaction, timing, reports, and offline protocol tests are
+project modifications. See [NOTICE](NOTICE) for the precise attribution.

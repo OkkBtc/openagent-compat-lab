@@ -5,10 +5,11 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
-from mcs.agent_checks import run_agent_checks
+from mcs.agent_checks import run_agent_checks, run_agent_matrix
 from mcs.capabilities import FAIL, PASS
 from mcs.cli import main
 from mcs.client import ApiError
@@ -21,6 +22,7 @@ class _MockHandler(BaseHTTPRequestHandler):
     required_key = "test-secret"
     chat_done = True
     response_text = "agent-compat-ok"
+    request_bodies: ClassVar[list[dict]] = []
 
     def log_message(self, format, *args):
         pass
@@ -55,6 +57,7 @@ class _MockHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "unauthorized"}, 401)
             return
         body = self._body()
+        self.request_bodies.append(body)
         if self.path == "/v1/chat/completions":
             self._chat(body)
         elif self.path == "/v1/responses":
@@ -64,9 +67,32 @@ class _MockHandler(BaseHTTPRequestHandler):
 
     def _chat(self, body):
         if body.get("stream"):
-            events = [
-                'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
-            ]
+            if body.get("tools"):
+                events = [
+                    (
+                        'data: {"choices":[{"delta":{"tool_calls":'
+                        '[{"index":0,"id":"call_order","type":"function",'
+                        '"function":{"name":"lookup_order",'
+                        '"arguments":"{\\"order_"}}]}}]}\n\n'
+                    ),
+                    (
+                        'data: {"choices":[{"delta":{"tool_calls":'
+                        '[{"index":1,"id":"call_weather","type":"function",'
+                        '"function":{"name":"get_weather",'
+                        '"arguments":"{\\"loca"}}]}}]}\n\n'
+                    ),
+                    (
+                        'data: {"choices":[{"delta":{"tool_calls":'
+                        '[{"index":0,"function":'
+                        '{"arguments":"id\\":\\"A-100\\"}"}},'
+                        '{"index":1,"function":'
+                        '{"arguments":"tion\\":\\"Paris\\"}"}}]}}]}\n\n'
+                    ),
+                ]
+            else:
+                events = [
+                    'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+                ]
             if self.chat_done:
                 events.append("data: [DONE]\n\n")
             raw = "".join(events).encode()
@@ -76,7 +102,14 @@ class _MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
-        if body.get("tools"):
+        messages = body.get("messages") or []
+        if messages and messages[-1].get("role") == "tool":
+            message = {
+                "role": "assistant",
+                "content": "Order A-100 is ready.",
+            }
+            finish_reason = "stop"
+        elif body.get("tools"):
             message = {
                 "role": "assistant",
                 "content": None,
@@ -91,11 +124,16 @@ class _MockHandler(BaseHTTPRequestHandler):
                     }
                 ],
             }
+            finish_reason = "tool_calls"
         elif body.get("response_format"):
             message = {"role": "assistant", "content": '{"compatible":true}'}
+            finish_reason = "stop"
         else:
             message = {"role": "assistant", "content": self.response_text}
-        self._send_json({"choices": [{"message": message, "finish_reason": "stop"}]})
+            finish_reason = "stop"
+        self._send_json(
+            {"choices": [{"message": message, "finish_reason": finish_reason}]}
+        )
 
     @staticmethod
     def _response_message(text):
@@ -120,7 +158,14 @@ class _MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
-        if body.get("tools"):
+        input_items = body.get("input")
+        if (
+            isinstance(input_items, list)
+            and input_items
+            and input_items[0].get("type") == "function_call_output"
+        ):
+            output = [self._response_message("Order A-100 is ready.")]
+        elif body.get("tools"):
             output = [
                 {
                     "id": "call_1",
@@ -142,6 +187,7 @@ def mock_endpoint():
     _MockHandler.required_key = "test-secret"
     _MockHandler.chat_done = True
     _MockHandler.response_text = "agent-compat-ok"
+    _MockHandler.request_bodies = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _MockHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -157,19 +203,66 @@ def _config(base_url, key="test-secret"):
     return Config(base_url, key, "mock-model", 2)
 
 
-@pytest.mark.parametrize("profile", ["generic", "hermes", "openclaw"])
-def test_chat_profiles_pass(mock_endpoint, profile):
+@pytest.mark.parametrize(
+    ("profile", "expected_count", "specific_check"),
+    [
+        ("generic", 7, None),
+        ("hermes", 8, "hermes_tool_result_roundtrip"),
+        ("openclaw", 8, "openclaw_streamed_parallel_tools"),
+    ],
+)
+def test_chat_profiles_pass(mock_endpoint, profile, expected_count, specific_check):
     base_url, _ = mock_endpoint
     results = run_agent_checks(_config(base_url), profile)
-    assert len(results) == 7
+    assert len(results) == expected_count
     assert {result.status for result in results} == {PASS}
+    assert all(result.duration_ms >= 0 for result in results)
+    if specific_check:
+        assert specific_check in {result.name for result in results}
 
 
 def test_codex_profile_passes(mock_endpoint):
     base_url, _ = mock_endpoint
     results = run_agent_checks(_config(base_url), "codex")
-    assert len(results) == 7
+    assert len(results) == 8
     assert {result.status for result in results} == {PASS}
+    assert "responses_tool_result_roundtrip" in {result.name for result in results}
+
+
+def test_hermes_roundtrip_uses_strict_role_order(mock_endpoint):
+    base_url, _ = mock_endpoint
+    run_agent_checks(_config(base_url), "hermes")
+    roundtrip = next(
+        body
+        for body in _MockHandler.request_bodies
+        if len(body.get("messages") or []) == 3
+    )
+    messages = roundtrip["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "tool"]
+    assert messages[2]["tool_call_id"] == messages[1]["tool_calls"][0]["id"]
+
+
+def test_codex_roundtrip_pairs_call_id_and_previous_response(mock_endpoint):
+    base_url, _ = mock_endpoint
+    run_agent_checks(_config(base_url), "codex")
+    roundtrip = next(
+        body
+        for body in _MockHandler.request_bodies
+        if isinstance(body.get("input"), list)
+        and body["input"]
+        and body["input"][0].get("type") == "function_call_output"
+    )
+    assert roundtrip["previous_response_id"] == "resp_1"
+    assert roundtrip["input"][0]["call_id"] == "call_1"
+
+
+def test_agent_matrix_runs_named_profiles(mock_endpoint):
+    base_url, _ = mock_endpoint
+    matrix = run_agent_matrix(_config(base_url))
+    assert list(matrix) == ["codex", "hermes", "openclaw"]
+    assert all(
+        result.status == PASS for results in matrix.values() for result in results
+    )
 
 
 def test_chat_profile_detects_missing_done(mock_endpoint):
@@ -204,7 +297,41 @@ def test_cli_writes_json_and_markdown(mock_endpoint, monkeypatch, capsys, tmp_pa
     assert payload["profile"] == "codex"
     assert "test-secret" not in output
     assert "test-secret" not in report.read_text()
-    assert "7 passed, 0 failed/broken" in report.read_text()
+    assert "8 passed, 0 failed/broken" in report.read_text()
+    assert "Probe time" in report.read_text()
+    assert payload["summary"]["compatible"] is True
+    assert "duration_ms" in payload["checks"][0]
+
+
+def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_path):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    report = tmp_path / "matrix.md"
+    status = main(
+        [
+            "--profile",
+            "all",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--json",
+            "--markdown",
+            str(report),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert [row["profile"] for row in payload["matrix"]] == [
+        "codex",
+        "hermes",
+        "openclaw",
+    ]
+    assert all(row["compatible"] for row in payload["matrix"])
+    markdown = report.read_text()
+    assert "Agent Compat Lab matrix" in markdown
+    assert "responses_tool_result_roundtrip" in markdown
+    assert "openclaw_streamed_parallel_tools" in markdown
 
 
 def test_cli_allows_explicit_no_auth(mock_endpoint, monkeypatch):
@@ -228,7 +355,7 @@ def test_cli_allows_explicit_no_auth(mock_endpoint, monkeypatch):
     assert status == 0
 
 
-@pytest.mark.parametrize("profile", ["hermes", "codex"])
+@pytest.mark.parametrize("profile", ["hermes", "codex", "all"])
 def test_installed_console_script_end_to_end(mock_endpoint, profile):
     base_url, _ = mock_endpoint
     executable = Path(sys.executable).with_name("agent-compat")

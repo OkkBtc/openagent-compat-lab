@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from .redaction import redact
 
 CHAT_PROFILES = {"generic", "hermes", "openclaw"}
 AGENT_PROFILES = CHAT_PROFILES | {"codex"}
+MATRIX_PROFILES = ("codex", "hermes", "openclaw")
 
 _IMAGE_DATA_URL = (
     "data:image/png;base64,"
@@ -36,6 +38,20 @@ _CHAT_ORDER_TOOL = {
         "name": "lookup_order",
         "description": "Look up an order by id.",
         "parameters": _ORDER_PARAMETERS,
+        "strict": True,
+    },
+}
+_CHAT_WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"location": {"type": "string"}},
+            "required": ["location"],
+            "additionalProperties": False,
+        },
         "strict": True,
     },
 }
@@ -144,6 +160,97 @@ def _check_chat_tool(client: ChatClient) -> None:
     assert arguments.get("order_id") == "A-100", "required order_id was not extracted"
 
 
+def _check_hermes_tool_roundtrip(client: ChatClient) -> None:
+    messages = [{"role": "user", "content": "Look up order A-100."}]
+    first = client.chat(
+        messages,
+        tools=[_CHAT_ORDER_TOOL],
+        tool_choice={"type": "function", "function": {"name": "lookup_order"}},
+    )
+    choice = first["choices"][0]
+    assistant = _message(first)
+    calls = assistant.get("tool_calls")
+    assert isinstance(calls, list) and len(calls) == 1, (
+        "initial assistant message must contain exactly one tool call"
+    )
+    call = calls[0]
+    assert choice.get("finish_reason") == "tool_calls", (
+        "tool request did not finish with tool_calls"
+    )
+    assert call.get("id"), "tool call is missing an id"
+    assert assistant.get("role") == "assistant", (
+        "tool call message role is not assistant"
+    )
+
+    final = client.chat(
+        [
+            *messages,
+            assistant,
+            {
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "content": json.dumps({"order_id": "A-100", "status": "ready"}),
+            },
+        ],
+        tools=[_CHAT_ORDER_TOOL],
+    )
+    final_message = _message(final)
+    assert isinstance(final_message.get("content"), str), (
+        "assistant did not produce final text after the tool result"
+    )
+    assert not final_message.get("tool_calls"), (
+        "assistant requested another tool instead of consuming the tool result"
+    )
+
+
+def _check_openclaw_streamed_parallel_tools(client: ChatClient) -> None:
+    chunks, done = client.chat_stream_events(
+        [
+            {
+                "role": "user",
+                "content": "Look up order A-100 and the weather in Paris.",
+            }
+        ],
+        tools=[_CHAT_ORDER_TOOL, _CHAT_WEATHER_TOOL],
+        tool_choice="required",
+    )
+    assert done, "parallel tool stream ended without the [DONE] sentinel"
+
+    calls = {}
+    for chunk in chunks:
+        choices = chunk.get("choices") or []
+        if not choices:
+            continue
+        for part in choices[0].get("delta", {}).get("tool_calls") or []:
+            index = part.get("index")
+            assert isinstance(index, int), "streamed tool delta is missing its index"
+            call = calls.setdefault(
+                index, {"id": "", "type": "", "name": "", "arguments": ""}
+            )
+            if part.get("id"):
+                call["id"] = part["id"]
+            if part.get("type"):
+                call["type"] = part["type"]
+            function = part.get("function") or {}
+            call["name"] += function.get("name") or ""
+            call["arguments"] += function.get("arguments") or ""
+
+    assert len(calls) == 2, "expected two indexed tool calls in the stream"
+    by_name = {call["name"]: call for call in calls.values()}
+    assert set(by_name) == {"lookup_order", "get_weather"}, (
+        "streamed tool names could not be reconstructed"
+    )
+    assert all(call["id"] for call in calls.values()), (
+        "a streamed tool call is missing its id"
+    )
+    order_args = json.loads(by_name["lookup_order"]["arguments"])
+    weather_args = json.loads(by_name["get_weather"]["arguments"])
+    assert order_args.get("order_id") == "A-100", "streamed order id is incorrect"
+    assert weather_args.get("location") == "Paris", (
+        "streamed weather location is incorrect"
+    )
+
+
 def _check_chat_optional_args(client: ChatClient) -> None:
     arguments = json.loads(_chat_tool_call(client).get("arguments") or "")
     assert "include_history" not in arguments, (
@@ -205,6 +312,37 @@ def _check_responses_tool(client: ChatClient) -> None:
     assert call.get("name") == "lookup_order", "forced tool name was not honored"
     arguments = json.loads(call.get("arguments") or "")
     assert arguments.get("order_id") == "A-100", "required order_id was not extracted"
+
+
+def _check_responses_tool_roundtrip(client: ChatClient) -> None:
+    first = client.response(
+        "Look up order A-100.",
+        tools=[_RESPONSE_ORDER_TOOL],
+        tool_choice={"type": "function", "name": "lookup_order"},
+    )
+    response_id = first.get("id")
+    assert isinstance(response_id, str) and response_id, (
+        "initial Responses result is missing its response id"
+    )
+    calls = [
+        item for item in _response_output(first) if item.get("type") == "function_call"
+    ]
+    assert len(calls) == 1, "initial response must contain exactly one function_call"
+    call_id = calls[0].get("call_id")
+    assert isinstance(call_id, str) and call_id, "function_call is missing call_id"
+
+    final = client.response(
+        [
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": json.dumps({"order_id": "A-100", "status": "ready"}),
+            }
+        ],
+        previous_response_id=response_id,
+        tools=[_RESPONSE_ORDER_TOOL],
+    )
+    _response_text(final)
 
 
 def _check_responses_optional_args(client: ChatClient) -> None:
@@ -269,34 +407,70 @@ _CODEX_CHECKS = [
     ("responses_json_schema", _check_responses_json_schema),
     ("responses_image_detail_original", _check_responses_image_original),
 ]
+_PROFILE_CHECKS = {
+    "generic": _CHAT_CHECKS,
+    "hermes": [
+        *_CHAT_CHECKS,
+        ("hermes_tool_result_roundtrip", _check_hermes_tool_roundtrip),
+    ],
+    "openclaw": [
+        *_CHAT_CHECKS,
+        ("openclaw_streamed_parallel_tools", _check_openclaw_streamed_parallel_tools),
+    ],
+    "codex": [
+        *_CODEX_CHECKS,
+        ("responses_tool_result_roundtrip", _check_responses_tool_roundtrip),
+    ],
+}
 
 
 def _run_one(
-    name: str, check: Callable[[ChatClient], None], client: ChatClient
+    profile: str,
+    name: str,
+    check: Callable[[ChatClient], None],
+    client: ChatClient,
 ) -> Result:
     recording.configure(
         os.environ.get("ACL_RECORD_DIR") or os.environ.get("MCS_RECORD_DIR"),
-        name,
+        f"{profile}_{name}",
         redact(client.config.model, client.config.api_key),
     )
+    started = time.perf_counter()
     try:
         check(client)
     except AssertionError as exc:
-        return Result(name, FAIL, redact(exc, client.config.api_key)[:200])
+        return Result(
+            name,
+            FAIL,
+            redact(exc, client.config.api_key)[:200],
+            round((time.perf_counter() - started) * 1000, 1),
+        )
     except Exception as exc:  # noqa: BLE001 - each probe must produce a result
-        return Result(name, BROKEN, redact(exc, client.config.api_key)[:200])
+        return Result(
+            name,
+            BROKEN,
+            redact(exc, client.config.api_key)[:200],
+            round((time.perf_counter() - started) * 1000, 1),
+        )
     finally:
         recording.reset()
-    return Result(name, PASS)
+    return Result(name, PASS, "", round((time.perf_counter() - started) * 1000, 1))
 
 
 def run_agent_checks(config: Config, profile: str) -> list[Result]:
-    """Run the seven deterministic checks for one agent profile."""
+    """Run deterministic protocol checks for one agent profile."""
     if profile not in AGENT_PROFILES:
         raise ValueError(f"unknown agent profile: {profile}")
-    checks = _CODEX_CHECKS if profile == "codex" else _CHAT_CHECKS
     client = ChatClient(config)
-    return [_run_one(name, check, client) for name, check in checks]
+    return [
+        _run_one(profile, name, check, client)
+        for name, check in _PROFILE_CHECKS[profile]
+    ]
+
+
+def run_agent_matrix(config: Config) -> dict[str, list[Result]]:
+    """Run the three named-agent profiles in stable display order."""
+    return {profile: run_agent_checks(config, profile) for profile in MATRIX_PROFILES}
 
 
 def _safe_endpoint(config: Config) -> str:
@@ -307,24 +481,85 @@ def _safe_model(config: Config) -> str:
     return redact(config.model, config.api_key)
 
 
-def _markdown(config: Config, profile: str, results: list[Result]) -> str:
+def _summary(results: list[Result]) -> dict:
     passed = sum(result.status == PASS for result in results)
     failed = len(results) - passed
+    return {
+        "passed": passed,
+        "failed_or_broken": failed,
+        "total": len(results),
+        "duration_ms": round(sum(result.duration_ms for result in results), 1),
+        "compatible": failed == 0,
+    }
+
+
+def _markdown(config: Config, profile: str, results: list[Result]) -> str:
+    summary = _summary(results)
     lines = [
         "# Agent Compat Lab report",
         "",
         f"- Profile: `{profile}`",
         f"- Model: `{_safe_model(config)}`",
         f"- Endpoint: `{_safe_endpoint(config)}`",
-        f"- Result: **{passed} passed, {failed} failed/broken**",
+        (
+            f"- Result: **{summary['passed']} passed, "
+            f"{summary['failed_or_broken']} failed/broken**"
+        ),
+        f"- Probe time: **{summary['duration_ms']:.1f} ms**",
         "",
-        "| Check | Status | Detail |",
-        "|---|---|---|",
+        "| Check | Status | Time | Detail |",
+        "|---|---|---:|---|",
     ]
     icons = {PASS: "PASS", FAIL: "FAIL", BROKEN: "BROKEN"}
     for result in results:
         detail = result.detail.replace("|", "\\|").replace("\n", " ")
-        lines.append(f"| `{result.name}` | {icons[result.status]} | {detail} |")
+        lines.append(
+            f"| `{result.name}` | {icons[result.status]} | "
+            f"{result.duration_ms:.1f} ms | {detail} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _matrix_markdown(config: Config, runs: dict[str, list[Result]]) -> str:
+    paths = {
+        "codex": "Responses API",
+        "hermes": "Chat Completions",
+        "openclaw": "Chat Completions stream",
+    }
+    lines = [
+        "# Agent Compat Lab matrix",
+        "",
+        f"- Model: `{_safe_model(config)}`",
+        f"- Endpoint: `{_safe_endpoint(config)}`",
+        "",
+        "| Profile | API path | Passed | Failed/broken | Time | Verdict |",
+        "|---|---|---:|---:|---:|---|",
+    ]
+    for profile, results in runs.items():
+        summary = _summary(results)
+        verdict = "COMPATIBLE" if summary["compatible"] else "INCOMPATIBLE"
+        lines.append(
+            f"| `{profile}` | {paths[profile]} | {summary['passed']}/"
+            f"{summary['total']} | {summary['failed_or_broken']} | "
+            f"{summary['duration_ms']:.1f} ms | **{verdict}** |"
+        )
+    for profile, results in runs.items():
+        lines.extend(
+            [
+                "",
+                f"## {profile}",
+                "",
+                "| Check | Status | Time | Detail |",
+                "|---|---|---:|---|",
+            ]
+        )
+        for result in results:
+            detail = result.detail.replace("|", "\\|").replace("\n", " ")
+            lines.append(
+                f"| `{result.name}` | {result.status.upper()} | "
+                f"{result.duration_ms:.1f} ms | {detail} |"
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -341,6 +576,7 @@ def report_agent(
         "profile": profile,
         "model": _safe_model(config),
         "api_base": _safe_endpoint(config),
+        "summary": _summary(results),
         "checks": [result.__dict__ for result in results],
     }
     if markdown_path:
@@ -357,10 +593,63 @@ def report_agent(
         width = max(len(result.name) for result in results)
         icons = {PASS: "✔", FAIL: "✗", BROKEN: "⚠"}
         for result in results:
-            print(f"  {icons[result.status]} {result.name:<{width}}  {result.detail}")
-        passed = sum(result.status == PASS for result in results)
-        failed = len(results) - passed
-        print(f"\n  {len(results)} checks · {passed} passed · {failed} failed/broken")
+            print(
+                f"  {icons[result.status]} {result.name:<{width}}  "
+                f"{result.duration_ms:>7.1f} ms  {result.detail}"
+            )
+        summary = _summary(results)
+        print(
+            f"\n  {summary['total']} checks · {summary['passed']} passed · "
+            f"{summary['failed_or_broken']} failed/broken · "
+            f"{summary['duration_ms']:.1f} ms"
+        )
         if markdown_path:
             print(f"  markdown: {markdown_path}")
     return 1 if any(result.status in {FAIL, BROKEN} for result in results) else 0
+
+
+def report_agent_matrix(
+    config: Config,
+    *,
+    as_json: bool = False,
+    markdown_path: str | None = None,
+) -> int:
+    runs = run_agent_matrix(config)
+    rows = []
+    for profile, results in runs.items():
+        rows.append({"profile": profile, **_summary(results)})
+    payload = {
+        "profile": "all",
+        "model": _safe_model(config),
+        "api_base": _safe_endpoint(config),
+        "matrix": rows,
+        "profiles": {
+            profile: {
+                "summary": _summary(results),
+                "checks": [result.__dict__ for result in results],
+            }
+            for profile, results in runs.items()
+        },
+    }
+    if markdown_path:
+        path = Path(markdown_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_matrix_markdown(config, runs), encoding="utf-8")
+
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print(f"Agent compatibility matrix for {_safe_model(config)}")
+        print(f"  endpoint: {_safe_endpoint(config)}\n")
+        print("  profile    passed  failed  duration     verdict")
+        print("  ---------- ------- ------- ------------ ----------")
+        for row in rows:
+            verdict = "compatible" if row["compatible"] else "incompatible"
+            print(
+                f"  {row['profile']:<10} {row['passed']:>3}/{row['total']:<3} "
+                f"{row['failed_or_broken']:>7} {row['duration_ms']:>8.1f} ms "
+                f"{verdict:>12}"
+            )
+        if markdown_path:
+            print(f"\n  markdown: {markdown_path}")
+    return 1 if any(not row["compatible"] for row in rows) else 0

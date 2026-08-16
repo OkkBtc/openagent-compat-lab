@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-compat-lab"
-version = "0.1.0"
+version = "0.2.0"
 description = "Deterministic compatibility checks for Codex, Hermes, OpenClaw, and OpenAI-style LLM endpoints"
 requires-python = ">=3.10"
 license = "Apache-2.0"
