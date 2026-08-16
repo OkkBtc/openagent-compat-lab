@@ -14,9 +14,10 @@ import requests
 
 from . import recording
 from .config import Config
+from .redaction import redact
 
 
-def _record_iter_lines(resp: requests.Response) -> None:
+def _record_iter_lines(resp: requests.Response, *secrets: str) -> None:
     """Wrap ``resp.iter_lines`` so the streamed SSE body is recorded as the
     consumer drains it. Records on normal exhaustion or early close (finally),
     while the test context is still active. No-op when recording is off."""
@@ -34,16 +35,17 @@ def _record_iter_lines(resp: requests.Response) -> None:
                     )
                 yield line
         finally:
-            recording.record("output", "\n".join(buf))
+            recording.record("output", redact("\n".join(buf), *secrets))
 
     resp.iter_lines = teed
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, body: str):
-        super().__init__(f"HTTP {status}: {body[:500]}")
+    def __init__(self, status: int, body: str, *secrets: str):
+        safe_body = redact(body, *secrets)
+        super().__init__(f"HTTP {status}: {safe_body[:500]}")
         self.status = status
-        self.body = body
+        self.body = safe_body
 
 
 class ChatClient:
@@ -89,30 +91,47 @@ class ChatClient:
             payload.update(extra)
         return payload
 
+    def _request(
+        self, method: str, path: str, body: dict | None = None, *, stream: bool = False
+    ) -> requests.Response:
+        """Send one raw request without retries or response normalization."""
+        if body is not None:
+            request_text = json.dumps(body, indent=2, ensure_ascii=False)
+            recording.record("input", redact(request_text, self.config.api_key))
+        try:
+            resp = requests.request(
+                method,
+                f"{self.config.api_base}{path}",
+                headers=self._headers(),
+                json=body,
+                stream=stream,
+                timeout=self.config.timeout,
+            )
+        except requests.RequestException as exc:
+            raise ApiError(0, str(exc), self.config.api_key) from exc
+        if not stream:
+            recording.record("output", redact(resp.text, self.config.api_key))
+        else:
+            _record_iter_lines(resp, self.config.api_key)
+        return resp
+
     def _post(
         self, path: str, body: dict, *, stream: bool = False
     ) -> requests.Response:
-        """POST ``body`` to ``path``, recording the request and (non-stream)
-        response so every endpoint the suite touches -- /tokenize, /detokenize,
-        /completions -- shows up under ``--record-responses``, not just
-        /chat/completions."""
-        recording.record("input", json.dumps(body, indent=2, ensure_ascii=False))
-        resp = requests.post(
-            f"{self.config.api_base}{path}",
-            headers=self._headers(),
-            json=body,
-            stream=stream,
-            timeout=self.config.timeout,
-        )
-        if not stream:
-            # Non-stream body is safe to read here; requests caches it so the
-            # caller's .json()/.text still works.
-            recording.record("output", resp.text)
-        else:
-            # Tee iter_lines so the SSE body is recorded as whoever consumes it
-            # (client.stream() OR a test iterating raw() directly) drains it.
-            _record_iter_lines(resp)
-        return resp
+        """POST ``body`` to ``path`` and optionally stream the response."""
+        return self._request("POST", path, body, stream=stream)
+
+    def _json_or_error(self, resp: requests.Response) -> dict:
+        if not resp.ok:
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
+        try:
+            return resp.json()
+        except requests.JSONDecodeError as exc:
+            raise ApiError(
+                resp.status_code,
+                f"invalid JSON response: {resp.text}",
+                self.config.api_key,
+            ) from exc
 
     def raw(self, payload: dict, *, stream: bool = False) -> requests.Response:
         """Escape hatch for error-path / malformed-request tests."""
@@ -120,15 +139,13 @@ class ChatClient:
 
     def chat(self, messages, **kw) -> dict:
         resp = self.raw(self._payload(messages, stream=False, **kw))
-        if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
-        return resp.json()
+        return self._json_or_error(resp)
 
     def stream(self, messages, **kw) -> Iterator[dict]:
         """Yield parsed SSE delta chunks until the [DONE] sentinel."""
         resp = self.raw(self._payload(messages, stream=True, **kw), stream=True)
         if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
         for line in resp.iter_lines(decode_unicode=True):  # teed by raw() to record
             if not line or not line.startswith("data:"):
                 continue
@@ -136,6 +153,64 @@ class ChatClient:
             if data == "[DONE]":
                 return
             yield json.loads(data)
+
+    @staticmethod
+    def _sse(resp: requests.Response) -> Iterator[tuple[str | None, str]]:
+        """Yield ``(event, data)`` pairs from an SSE response."""
+        event = None
+        data = []
+        for line in resp.iter_lines(decode_unicode=True):
+            if line == "":
+                if data:
+                    yield event, "\n".join(data)
+                event, data = None, []
+            elif line.startswith("event:"):
+                event = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                data.append(line[len("data:") :].lstrip())
+        if data:
+            yield event, "\n".join(data)
+
+    def chat_stream_events(self, messages, **kw) -> tuple[list[dict], bool]:
+        """Return Chat Completions SSE chunks and whether ``[DONE]`` arrived."""
+        resp = self.raw(self._payload(messages, stream=True, **kw), stream=True)
+        if not resp.ok:
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
+        chunks = []
+        done = False
+        for _, data in self._sse(resp):
+            if data == "[DONE]":
+                done = True
+                break
+            chunks.append(json.loads(data))
+        return chunks, done
+
+    def models(self) -> dict:
+        """Return the OpenAI-compatible ``/models`` response."""
+        return self._json_or_error(self._request("GET", "/models"))
+
+    def response(self, input_data, **fields) -> dict:
+        """Create one non-streaming Responses API response."""
+        body = {"model": self.config.model, "input": input_data, **fields}
+        return self._json_or_error(self._post("/responses", body))
+
+    def response_stream(self, input_data, **fields) -> list[tuple[str | None, dict]]:
+        """Return parsed events from one streaming Responses API request."""
+        body = {
+            "model": self.config.model,
+            "input": input_data,
+            "stream": True,
+            **fields,
+        }
+        resp = self._post("/responses", body, stream=True)
+        if not resp.ok:
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
+        events = []
+        for event, data in self._sse(resp):
+            if data == "[DONE]":
+                continue
+            events.append((event, json.loads(data)))
+        return events
 
     def complete(
         self, prompt: str, *, max_tokens: int, temperature: float = 0.0
@@ -153,9 +228,7 @@ class ChatClient:
             "temperature": temperature,
         }
         resp = self._post("/completions", body)
-        if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
-        return resp.json()
+        return self._json_or_error(resp)
 
     @staticmethod
     def completion_text(response: dict) -> str:
@@ -184,10 +257,14 @@ class ChatClient:
         }
         resp = self._post("/completions", body)
         if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
         pl = resp.json()["choices"][0].get("prompt_logprobs")
         if not pl:
-            raise ApiError(resp.status_code, "endpoint returned no prompt_logprobs")
+            raise ApiError(
+                resp.status_code,
+                "endpoint returned no prompt_logprobs",
+                self.config.api_key,
+            )
         return [int(next(iter(e))) if e else None for e in pl[:n]]
 
     def tokenize(self, prompt: str, add_special_tokens: bool | None = None) -> list:
@@ -203,7 +280,7 @@ class ChatClient:
             body["add_special_tokens"] = add_special_tokens
         resp = self._post("/tokenize", body)
         if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
         return resp.json()["tokens"]
 
     def tokenize_chat(self, messages: list, add_generation_prompt: bool = True) -> list:
@@ -223,14 +300,14 @@ class ChatClient:
             },
         )
         if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
         return resp.json()["tokens"]
 
     def detokenize(self, tokens: list) -> str:
         """Text for ``tokens`` via the ``/detokenize`` endpoint."""
         resp = self._post("/detokenize", {"model": self.config.model, "tokens": tokens})
         if not resp.ok:
-            raise ApiError(resp.status_code, resp.text)
+            raise ApiError(resp.status_code, resp.text, self.config.api_key)
         return resp.json()["prompt"]
 
     # -- convenience helpers used by suites ---------------------------------

@@ -28,10 +28,8 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
-            api_base=_env(
-                "MCS_API_BASE", default="https://api.swissai.svc.cscs.ch/v1"
-            ).rstrip("/"),
-            api_key=_env("MCS_API_KEY", "CSCS_SERVING_API", default=""),
-            model=_env("MCS_MODEL", default="swiss-ai/Apertus-8B-Instruct-2509"),
-            timeout=float(_env("MCS_TIMEOUT", default="120")),
+            api_base=_env("ACL_API_BASE", "MCS_API_BASE", default="").rstrip("/"),
+            api_key=_env("ACL_API_KEY", "MCS_API_KEY", "CSCS_SERVING_API", default=""),
+            model=_env("ACL_MODEL", "MCS_MODEL", default=""),
+            timeout=float(_env("ACL_TIMEOUT", "MCS_TIMEOUT", default="60")),
         )

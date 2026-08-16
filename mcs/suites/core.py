@@ -9,6 +9,7 @@ This is the pattern other suites should follow:
 
 import re
 from collections import Counter
+from itertools import pairwise
 
 import pytest
 
@@ -207,7 +208,7 @@ def _degeneration_reason(content):
     if len(words) < 8:
         return None
     max_run = run = 1
-    for a, b in zip(words, words[1:]):
+    for a, b in pairwise(words):
         run = run + 1 if a == b else 1
         max_run = max(max_run, run)
     if max_run >= 6:

@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
-# Bootstrap + run mcs against a hosted API.
+# Bootstrap + run Agent Compat Lab against an OpenAI-style API.
 #
-# Runs the deterministic suites and prints a ✔/✗ capability table (exit non-zero
-# on failure). Scope with --capability TYPE; compare models with repeated --model.
+# Runs deterministic agent protocol checks and exits non-zero on failure.
 #
-# Remote (the common case):
-#   export CSCS_SERVING_API=...   # bearer token
-#   curl -fsSL https://raw.githubusercontent.com/swiss-ai/model-compatibility-suite/main/run.sh | bash
-#
-# Scoped:
-#   curl -fsSL .../run.sh | bash -s -- --suite tools,streaming --model <id>
+# Remote:
+#   export ACL_API_KEY=...   # bearer token
+#   curl -fsSL https://raw.githubusercontent.com/OkkBtc/agent-compat-lab/main/run.sh | \
+#     bash -s -- --profile codex --base-url <url> --model <id>
 #
 # Inside a checkout (skip the git install, use the local tree):
-#   bash run.sh --local --suite core
+#   bash run.sh --local --profile hermes --base-url <url> --model <id>
 #
-# Flags: --suite a,b  --model ID  --spec openai|dev  --base-url URL  --junit PATH  --local
-# Config via env: MCS_API_BASE, MCS_API_KEY|CSCS_SERVING_API,
-#                 MCS_MODEL, MCS_TIMEOUT.
-# See SPEC.md section 3.
+# Config via env: ACL_API_BASE, ACL_API_KEY, ACL_MODEL, ACL_TIMEOUT.
 set -euo pipefail
 
-REPO="${MCS_REPO:-https://github.com/swiss-ai/model-compatibility-suite}"
-REF="${MCS_REF:-main}"
+REPO="${ACL_REPO:-https://github.com/OkkBtc/agent-compat-lab}"
+REF="${ACL_REF:-main}"
 LOCAL=0
 ARGS=()
 while [ "$#" -gt 0 ]; do
@@ -31,38 +25,32 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "${MCS_API_KEY:-}" ] && [ -z "${CSCS_SERVING_API:-}" ]; then
-  echo "error: set CSCS_SERVING_API (or MCS_API_KEY) to your bearer token" >&2
-  exit 2
-fi
-
-PYTHON="${PYTHON:-python3}"
-VENV="$(mktemp -d)/venv"
-cleanup() { rm -rf "$(dirname "$VENV")"; }
+ACL_PYTHON_BIN="${ACL_PYTHON_BIN:-python3}"
+ACL_TEMP_DIR="$(mktemp -d)"
+ACL_VENV="$ACL_TEMP_DIR/venv"
+cleanup() { rm -rf "$ACL_TEMP_DIR"; }
 trap cleanup EXIT
 
 echo "Setting up test environment..."
-"$PYTHON" -m venv "$VENV"
+"$ACL_PYTHON_BIN" -m venv "$ACL_VENV"
 # shellcheck disable=SC1091
-. "$VENV/bin/activate"
+. "$ACL_VENV/bin/activate"
 pip install --quiet --upgrade pip
 
 # Install from git by default. Only use the local tree with an explicit --local
 # (otherwise a stray ./pyproject.toml in the CWD -- e.g. another project -- would
-# get installed instead of mcs).
+# get installed instead of Agent Compat Lab).
 if [ "$LOCAL" -eq 1 ]; then
   pip install --quiet -e ".[dev]"
 else
-  pip install --quiet "mcs @ git+${REPO}@${REF}"
+  pip install --quiet "agent-compat-lab @ git+${REPO}@${REF}"
 fi
 
-echo "Running mcs..."
-# Runs all capability checks by default. Pass --capability TYPE / --model
-# through ARGS to scope or compare.
+echo "Running Agent Compat Lab..."
 set +e
 # `${ARGS[@]+...}` guards against the macOS bash 3.2 "unbound variable" error
 # when ARGS is empty under `set -u`.
-mcs ${ARGS[@]+"${ARGS[@]}"}
+agent-compat ${ARGS[@]+"${ARGS[@]}"}
 status=$?
 set -e
 exit "$status"

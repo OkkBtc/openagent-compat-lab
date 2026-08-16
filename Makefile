@@ -1,10 +1,11 @@
-.PHONY: install install-dev run format check lint collect test
+.PHONY: install install-dev run format check lint collect test build
 
-# Optional overrides:  make run MODEL=Qwen/Qwen3.5-27B CAPABILITY=tools
+# Optional overrides: make run MODEL=qwen3 BASE_URL=http://localhost:11434/v1
 MODEL ?=
-CAPABILITY ?=
+BASE_URL ?=
+PROFILE ?= generic
 _MODEL = $(if $(MODEL),--model $(MODEL),)
-_CAP = $(if $(CAPABILITY),--capability $(CAPABILITY),)
+_BASE = $(if $(BASE_URL),--base-url $(BASE_URL),)
 
 # Prefer uv when available (uv-created venvs have no `pip`); fall back to pip.
 PIP := $(shell command -v uv >/dev/null 2>&1 && echo "uv pip" || echo "pip")
@@ -14,9 +15,9 @@ install:        ## editable install with dev tools (ruff)
 
 install-dev: install
 
-# Run the capability checks (the ✔/✗ table).
+# Run the focused agent checks (the ✔/✗ table).
 run:
-	mcs $(_MODEL) $(_CAP)
+	agent-compat --profile $(PROFILE) $(_MODEL) $(_BASE)
 
 # Auto-fix lint + format the tree.
 format:
@@ -30,10 +31,13 @@ check:
 
 lint: check
 
-# Offline: imports + test collection only, no API calls.
+# Offline: collect the inherited full suite, without API calls.
 collect:
-	pytest --collect-only -q
+	pytest mcs/suites --collect-only -q
 
-# Full suite (needs CSCS_SERVING_API / MCS_API_KEY set).
+# Offline agent-profile tests using the local mock server.
 test:
-	pytest
+	pytest tests -q
+
+build:
+	python -m build

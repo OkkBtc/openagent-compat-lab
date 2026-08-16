@@ -1,151 +1,176 @@
-# MCS — Model Compatibility Suite
+# Agent Compat Lab
 
-Lightweight tests that are 100% deterministic to prove the model (and system around it) will work in production. Designed to be prereq to evals and benchmarks.
+Find out whether an “OpenAI-compatible” LLM endpoint actually works with
+**Codex**, **Hermes**, **OpenClaw**, or a generic tool-using agent.
 
-Loosely based on Android's [Compatibility Test Suite (CTS)](https://source.android.com/docs/compatibility/cts): a deterministic conformance gate that certifies an implementation behaves as specified — here applied to served LLM endpoints instead of Android devices.
+Agent Compat Lab sends a small deterministic probe set directly from your
+machine to the endpoint, then produces a pass/fail table, JSON, or Markdown.
+It tests protocol behavior—not answer quality—and exits non-zero when a required
+behavior is missing.
 
-## Quickstart
+## What it checks
 
-```bash
-export CSCS_SERVING_API=...   # your bearer token
-curl -fsSL https://raw.githubusercontent.com/swiss-ai/model-compatibility-suite/main/run.sh | bash
-```
+| Profile | API path | Checks |
+|---|---|---|
+| `generic` | Chat Completions | models/auth, basic response, SSE `[DONE]`, forced tools, optional argument semantics, JSON Schema, image `detail: original` |
+| `hermes` | Chat Completions | the same focused checks under a Hermes-labelled report |
+| `openclaw` | Chat Completions | the same focused checks under an OpenClaw-labelled report |
+| `codex` | Responses API | models/auth, basic response, `response.completed`, forced tools, optional argument semantics, JSON Schema, `input_image` with `detail: original` |
+| `model` | Chat Completions + optional extensions | the full upstream Model Compatibility Suite |
 
-Scope to specific areas and pick a model:
+The agent profiles intentionally contain seven fast checks. They do not claim
+that every feature of an agent is supported; they catch the protocol gaps that
+most often break setup before a real task starts.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/swiss-ai/model-compatibility-suite/main/run.sh | bash -s -- --model swiss-ai/Apertus-8B-Instruct-2509
-```
+## Quick start
 
-The default run tests the **OpenAI API surface only** (`--spec openai`):
-checks that need extension endpoints the OpenAI spec does not define --
-`/tokenize`, `/detokenize` (the tokenizer-roundtrip and BOS token-identity
-suites) -- are excluded. Run `--spec dev` against endpoints that expose those
-extensions (e.g. vLLM/SGLang directly, or a gateway that forwards them) to add
-them.
-
-Every check is **deterministic** (status codes, response schema, token counts,
-substring / regex / closed-set membership) — there is intentionally no
-LLM-as-judge. Semantic/quality evaluation belongs in LLM evals, not in a
-functional pass/fail gate.
-
-## Usage
-
-One command. It runs the deterministic suites against a model and prints a
-**✔/✗ capability table**, exiting non-zero on any failure.
+Requires Python 3.10 or newer.
 
 ```bash
-mcs                              # OpenAI-spec checks, default model
-mcs --model swiss-ai/Apertus-1.5-8B-Instruct-sft-dpo-tools
-mcs --capability tools           # just one capability
-mcs --spec dev                   # + checks needing /tokenize etc.
-mcs --model A --model B          # compare models (table)
-mcs --model A --model B --detail # + per-model failure reasons
-mcs --json                       # machine-readable
+git clone https://github.com/OkkBtc/agent-compat-lab.git
+cd agent-compat-lab
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
-Status per check: `✔` pass · `✗` an assertion failed (a real gap) · `⚠` the
-check errored (e.g. the server returned an HTTP error) · `–` skipped. The
-capabilities are: `core` · `streaming` · `tools` · `multimodal` · `multiturn` ·
-`reasoning` · `robustness` (· `perf`, opt-in).
-
-Local development:
+Set credentials in the environment so they do not enter shell history:
 
 ```bash
-uv venv && source .venv/bin/activate   # or python -m venv .venv && source .venv/bin/activate
-make install                      # editable install (auto-detects `uv pip` / `pip`)
-make run MODEL=Qwen/Qwen3.5-27B   # run the checks
-make format                       # ruff auto-fix + format
-make check                        # ruff lint + format check (the CI PR gate)
+export ACL_API_KEY="your-provider-key"
+
+agent-compat \
+  --profile hermes \
+  --base-url https://provider.example/v1 \
+  --model provider/model-name
 ```
 
-Every PR runs `ruff check` + `ruff format --check` (see `.github/workflows/ci.yml`);
-keep the tree clean with `make format` before pushing.
+For Codex's Responses API path:
 
-## Example results
+```bash
+agent-compat \
+  --profile codex \
+  --base-url https://provider.example/v1 \
+  --model provider/model-name
+```
 
-Default OpenAI-spec run (`mcs --model swiss-ai/Apertus-v1.5-70B --model swiss-ai/Apertus-v1.5-8B`)
-against `https://api.swissai.svc.cscs.ch/v1`, 2026-08-06:
+For a local endpoint that intentionally has no authentication:
 
-| Check                                | M1 | M2 |
-|--------------------------------------|----|----|
-| core_health                          | ✔  | ✔  |
-| core_system                          | ✔  | ✔  |
-| core_maxtokens                       | ✔  | ✔  |
-| core_stop                            | ✔  | ✔  |
-| core_usage                           | ✔  | ✔  |
-| core_template_no_leak                | ✔  | ✔  |
-| core_no_degeneration                 | ✔  | ✔  |
-| core_no_degeneration_hard            | ✔  | ✔  |
-| core_multi_system                    | ⚠  | ⚠  |
-| core_assistant_prefill               | ✔  | ✔  |
-| core_determinism                     | ✔  | ✔  |
-| mm_image_small                       | ✔  | ✔  |
-| mm_image_large                       | ✔  | ✔  |
-| mm_image_multi                       | ✔  | ✔  |
-| mm_audio_small                       | ✔  | ✔  |
-| mm_audio_large                       | ✔  | ✔  |
-| mm_interleaved                       | ✔  | ✔  |
-| mm_no_degeneration_hard              | ✔  | ✔  |
-| mm_no_degeneration_hard_audio        | ✔  | ✔  |
-| mt_context                           | ✔  | ✔  |
-| mt_roles                             | ✔  | ✔  |
-| reason_parser_wired                  | –  | –  |
-| reason_produced                      | –  | –  |
-| reason_separation                    | ✔  | ✔  |
-| reason_clean_channel                 | –  | –  |
-| reason_answer                        | ✔  | ✔  |
-| reason_stream                        | –  | –  |
-| reason_tools                         | –  | –  |
-| reason_nothink_no_inner_leak         | ✔  | ✔  |
-| reason_nothink_no_inner_leak_sampled | ✔  | ✔  |
-| reason_disabled                      | –  | –  |
-| robust_specialtokens                 | ✔  | ✔  |
-| robust_consecutive_role              | ✔  | ✔  |
-| robust_unicode                       | ✔  | ✔  |
-| robust_empty                         | ✔  | ✔  |
-| robust_errors                        | ✔  | ✔  |
-| eos                                  | ✔  | ✔  |
-| stream_basic                         | ✔  | ✔  |
-| stream_finish                        | ✔  | ✔  |
-| stream_stop                          | ✔  | ✔  |
-| stream_equiv                         | ✔  | ✔  |
-| tools_single                         | ✔  | ✔  |
-| tools_choice_required                | ✗  | ✔  |
-| tools_choice_named                   | ✔  | ✔  |
-| tools_stream                         | ✔  | ✔  |
-| tools_none                           | ✔  | ✔  |
-| tools_parallel                       | ✗  | ✗  |
-| tools_multiturn                      | ✔  | ✔  |
-| tools_followup                       | ✔  | ✔  |
-| tools_no_content_leak                | ✗  | ✗  |
-| tools_arg_schema                     | ✔  | ✔  |
-| tools_empty_args                     | ✔  | ✔  |
-| tools_phantom                        | ✔  | ✔  |
-| **passed**                           | **43** | **44** |
-| **failed/broken**                    | **4**  | **3**  |
-| **skipped**                          | **6**  | **6**  |
+```bash
+agent-compat \
+  --profile generic \
+  --base-url http://127.0.0.1:11434/v1 \
+  --model qwen3 \
+  --allow-no-auth
+```
 
-Legend: ✔ pass · ✗ fail · ⚠ broken · – skip.
-M1 = `swiss-ai/Apertus-v1.5-70B` · M2 = `swiss-ai/Apertus-v1.5-8B`.
-The `reason_*` skips are expected — these are the non-thinking builds. The
-`core_multi_system` ⚠ is the gateway rejecting a second `system` message
-(HTTP 400), not a model gap.
+`--allow-no-auth` is explicit by design; a missing key otherwise stops before
+any network request is sent.
+
+## Reports and automation
+
+Print machine-readable JSON:
+
+```bash
+agent-compat --profile codex --base-url "$BASE_URL" --model "$MODEL" --json
+```
+
+Write a shareable Markdown report while keeping the console table:
+
+```bash
+agent-compat \
+  --profile openclaw \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --markdown compat-report.md
+```
+
+The process exits with `0` only when every check passes. This makes it suitable
+for CI, provider acceptance, and regression checks.
+
+Optional redacted wire records can help diagnose a failed provider:
+
+```bash
+agent-compat \
+  --profile hermes \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --record-responses ./compat-wire
+```
+
+The destination must not already exist. Authorization headers are never
+recorded, and known credentials are removed from bodies and errors.
 
 ## Configuration
 
-| Env var | Default |
-|---------|---------|
-| `MCS_API_BASE` | `https://api.swissai.svc.cscs.ch/v1` |
-| `MCS_API_KEY` (or `CSCS_SERVING_API`) | — (required) |
-| `MCS_MODEL` | `swiss-ai/Apertus-8B-Instruct-2509` |
+Command-line values take precedence by being copied into the same environment
+configuration used by the checks.
 
-## Suites
+| Variable | Meaning |
+|---|---|
+| `ACL_API_BASE` | API root, usually ending in `/v1` |
+| `ACL_API_KEY` | bearer token |
+| `ACL_MODEL` | exact model id expected from `GET /models` |
+| `ACL_TIMEOUT` | request timeout in seconds; default `60` |
 
-`core` · `streaming` · `tools` · `multimodal` · `multiturn` · `reasoning` ·
-`robustness` · `perf` (opt-in).
+Legacy `MCS_*` variables and `CSCS_SERVING_API` remain supported for the
+inherited full model suite. The old `mcs` executable is also retained as an
+alias, but new usage should call `agent-compat`.
 
-Only `core` is implemented today; the rest are stubs. **See
-[`SPEC.md`](./SPEC.md)** for the full specification, test catalog, open
-questions to probe against the live API, and implementation milestones — it is
-written so another engineer can take over the build from it directly.
+## Full model suite
+
+The upstream deterministic model conformance suite remains available:
+
+```bash
+agent-compat \
+  --profile model \
+  --base-url "$BASE_URL" \
+  --model "$MODEL"
+
+agent-compat \
+  --profile model \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --capability tools,streaming
+```
+
+Use `--spec dev` only for servers that expose non-standard `/tokenize` and
+`/detokenize` endpoints. See [SPEC.md](SPEC.md) for the inherited suite design.
+
+## Development
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+
+ruff check .
+ruff format --check .
+pytest tests -q
+pytest mcs/suites --collect-only -q
+python -m build
+```
+
+All agent-profile tests use a local standard-library HTTP mock; development and
+CI do not need a real provider key.
+
+## Security and privacy
+
+- Requests go directly from your machine to the base URL you provide.
+- The project has no telemetry and does not upload reports.
+- API keys are read from environment variables, not command-line flags.
+- Known keys, authorization values, URL user-info, and common secret query
+  parameters are redacted from errors and reports.
+- A real endpoint receives the small prompts, tool schema, and 1×1 inline test
+  image described by the checks above.
+
+Review an endpoint's privacy and billing terms before testing it.
+
+## Origin and license
+
+Agent Compat Lab is derived from
+[`swiss-ai/model-compatibility-suite`](https://github.com/swiss-ai/model-compatibility-suite)
+at commit
+[`531a52813d9be66d9fdf13c6a9d30875a770df66`](https://github.com/swiss-ai/model-compatibility-suite/commit/531a52813d9be66d9fdf13c6a9d30875a770df66).
+The Apache-2.0 license and upstream notices are preserved. See [NOTICE](NOTICE)
+for the modification summary.

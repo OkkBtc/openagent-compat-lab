@@ -1,0 +1,12 @@
+Agent Compat Lab
+
+This product includes software derived from:
+  Model Compatibility Suite
+  https://github.com/swiss-ai/model-compatibility-suite
+  Source commit: 531a52813d9be66d9fdf13c6a9d30875a770df66
+  License: Apache License 2.0
+
+Modifications include project rebranding, focused Codex/Hermes/OpenClaw agent
+profiles, Responses API probes, credential redaction, Markdown reports, and
+offline protocol tests. The original mcs Python package and full model suite
+remain available for compatibility and attribution continuity.

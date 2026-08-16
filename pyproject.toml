@@ -1,26 +1,30 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcs"
+name = "agent-compat-lab"
 version = "0.1.0"
-description = "Model Compatibility Suite: quick, deterministic capability + conformance tests for a served (OpenAI-compatible) model endpoint and the system around it"
-requires-python = ">=3.9"
-license = { file = "LICENSE" }
-classifiers = ["License :: OSI Approved :: Apache Software License"]
+description = "Deterministic compatibility checks for Codex, Hermes, OpenClaw, and OpenAI-style LLM endpoints"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "requests",
     "pytest",
 ]
 
 [project.optional-dependencies]
-dev = ["ruff"]
-# Heavy, opt-in: only needed for the future `--serve` (local vLLM) mode.
-serve = ["vllm"]
+dev = ["build", "ruff"]
 
 [project.scripts]
+agent-compat = "mcs.cli:main"
 mcs = "mcs.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/OkkBtc/agent-compat-lab"
+Issues = "https://github.com/OkkBtc/agent-compat-lab/issues"
+Source = "https://github.com/OkkBtc/agent-compat-lab"
 
 [tool.setuptools.packages.find]
 include = ["mcs*"]
@@ -31,7 +35,7 @@ include = ["mcs*"]
 mcs = ["assets/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mcs/suites"]
+testpaths = ["tests", "mcs/suites"]
 python_files = ["*.py"]
 markers = [
     "core: API contract basics",
@@ -48,7 +52,7 @@ markers = [
 addopts = "-ra -m 'not perf'"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 
 [tool.ruff.lint]

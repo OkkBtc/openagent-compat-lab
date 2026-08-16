@@ -11,6 +11,8 @@ deliberately no LLM-as-judge. Semantic/quality evaluation belongs in LLM evals,
 not in a functional gate.
 """
 
+import os
+
 import pytest
 
 from mcs.client import ChatClient
@@ -40,8 +42,8 @@ def pytest_configure(config):
 @pytest.fixture(scope="session")
 def config() -> Config:
     cfg = Config.from_env()
-    if not cfg.api_key:
-        pytest.skip("no API key (set CSCS_SERVING_API or MCS_API_KEY)")
+    if not cfg.api_key and os.environ.get("ACL_ALLOW_NO_AUTH") != "1":
+        pytest.skip("no API key (set ACL_API_KEY or opt into --allow-no-auth)")
     return cfg
 
 
@@ -55,8 +57,6 @@ def _record_responses(request):
     """Record each test's request/response when --record-responses DIR is set
     (plumbed via MCS_RECORD_DIR). Passive: it never alters what is sent or
     asserted, so suite behaviour is identical with or without it."""
-    import os
-
     from mcs import recording
 
     recording.configure(
