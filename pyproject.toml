@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcs"
+version = "0.1.0"
+description = "Model Compatibility Suite: quick, deterministic capability + conformance tests for a served (OpenAI-compatible) model endpoint and the system around it"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+classifiers = ["License :: OSI Approved :: Apache Software License"]
+dependencies = [
+    "requests",
+    "pytest",
+]
+
+[project.optional-dependencies]
+dev = ["ruff"]
+# Heavy, opt-in: only needed for the future `--serve` (local vLLM) mode.
+serve = ["vllm"]
+
+[project.scripts]
+mcs = "mcs.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mcs*"]
+
+[tool.setuptools.package-data]
+# Ship the multimodal fixture images/audio in the wheel (needed by the remote
+# pip-install flow, not just a source checkout).
+mcs = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["mcs/suites"]
+python_files = ["*.py"]
+markers = [
+    "core: API contract basics",
+    "special_tokens: BOS/EOS ownership across tokenization paths",
+    "streaming: SSE streaming behavior",
+    "tools: function / tool calling",
+    "multimodal: image and audio inputs",
+    "multiturn: multi-turn conversation state",
+    "reasoning: <think> / inner-monologue handling",
+    "robustness: chat-template injection & error paths",
+    "perf: performance smoke (excluded from default run)",
+    "dev: needs non-OpenAI extension endpoints (/tokenize, /detokenize); included by --spec dev",
+]
+addopts = "-ra -m 'not perf'"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+[tool.ruff.lint]
+# Defaults (E, F) + import sorting (I) + pyupgrade (UP) + bugbear (B).
+extend-select = ["I", "UP", "B"]
