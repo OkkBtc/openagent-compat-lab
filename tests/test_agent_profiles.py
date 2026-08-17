@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import threading
+import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -332,6 +333,70 @@ def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_p
     assert "openagent-compat-lab matrix" in markdown
     assert "responses_tool_result_roundtrip" in markdown
     assert "openclaw_streamed_parallel_tools" in markdown
+
+
+def test_cli_writes_agent_matrix_junit(mock_endpoint, monkeypatch, tmp_path):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    report = tmp_path / "agent-compat.xml"
+    status = main(
+        [
+            "--profile",
+            "all",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--junit",
+            str(report),
+            "--json",
+        ]
+    )
+
+    root = ET.parse(report).getroot()
+    assert status == 0
+    assert root.tag == "testsuites"
+    assert root.attrib == {
+        "tests": "24",
+        "failures": "0",
+        "errors": "0",
+        "time": root.attrib["time"],
+    }
+    assert [suite.attrib["name"] for suite in root.findall("testsuite")] == [
+        "openagent-compat-lab.codex",
+        "openagent-compat-lab.hermes",
+        "openagent-compat-lab.openclaw",
+    ]
+    assert len(root.findall(".//testcase")) == 24
+    assert "test-secret" not in report.read_text()
+
+
+def test_agent_junit_marks_protocol_failure(mock_endpoint, monkeypatch, tmp_path):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    _MockHandler.chat_done = False
+    report = tmp_path / "hermes.xml"
+    status = main(
+        [
+            "--profile",
+            "hermes",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--junit",
+            str(report),
+            "--json",
+        ]
+    )
+
+    root = ET.parse(report).getroot()
+    failure = root.find(".//testcase[@name='chat_stream_done']/failure")
+    assert status == 1
+    assert root.attrib["failures"] == "1"
+    assert root.attrib["errors"] == "0"
+    assert failure is not None
+    assert "[DONE]" in failure.attrib["message"]
 
 
 def test_cli_allows_explicit_no_auth(mock_endpoint, monkeypatch):
