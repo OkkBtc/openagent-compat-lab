@@ -151,6 +151,20 @@ agent-compat --profile all \
   --markdown compat-report.md
 ```
 
+Write standard JUnit XML for GitHub Actions, GitLab, Jenkins, or another CI
+test-report viewer:
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --junit compat-results.xml
+```
+
+The `all` profile writes one test suite per named agent. Protocol mismatches are
+reported as JUnit failures, while transport or runtime problems are reported as
+errors, so CI dashboards keep the two cases distinct.
+
 Exit status is `0` only when every selected check passes. `FAIL` means the
 endpoint returned a valid response that violated the asserted contract;
 `BROKEN` means transport, HTTP, JSON, or another runtime error prevented the

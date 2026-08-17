@@ -45,6 +45,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--markdown", metavar="PATH", help="also write an agent-profile Markdown report"
     )
+    parser.add_argument("--junit", metavar="PATH", help="write a JUnit XML report")
     parser.add_argument(
         "--record-responses",
         metavar="DIR",
@@ -59,7 +60,6 @@ def _parser() -> argparse.ArgumentParser:
         dest="capability",
         help="with --profile model, run only this capability (comma-separated ok)",
     )
-    model.add_argument("--junit", metavar="PATH", help="write full-suite JUnit XML")
     model.add_argument(
         "--detail",
         action="store_true",
@@ -114,10 +114,8 @@ def main(argv=None) -> int:
         )
 
     if args.profile != "model":
-        if args.capability or args.junit or args.detail or args.spec != "openai":
-            parser.error(
-                "--capability/--junit/--detail/--spec apply only to --profile model"
-            )
+        if args.capability or args.detail or args.spec != "openai":
+            parser.error("--capability/--detail/--spec apply only to --profile model")
         from .agent_checks import report_agent, report_agent_matrix
 
         report = report_agent_matrix if args.profile == "all" else report_agent
@@ -127,6 +125,7 @@ def main(argv=None) -> int:
             *report_args,
             as_json=args.json,
             markdown_path=args.markdown,
+            junit_path=args.junit,
         )
 
     if args.markdown:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from pathlib import Path
 
@@ -564,12 +565,87 @@ def _matrix_markdown(config: Config, runs: dict[str, list[Result]]) -> str:
     return "\n".join(lines)
 
 
+def _write_junit(
+    config: Config, runs: dict[str, list[Result]], junit_path: str
+) -> None:
+    results = [
+        result for profile_results in runs.values() for result in profile_results
+    ]
+    root = ET.Element(
+        "testsuites",
+        {
+            "tests": str(len(results)),
+            "failures": str(sum(result.status == FAIL for result in results)),
+            "errors": str(sum(result.status == BROKEN for result in results)),
+            "time": f"{sum(result.duration_ms for result in results) / 1000:.6f}",
+        },
+    )
+    for profile, profile_results in runs.items():
+        suite = ET.SubElement(
+            root,
+            "testsuite",
+            {
+                "name": f"openagent-compat-lab.{profile}",
+                "tests": str(len(profile_results)),
+                "failures": str(
+                    sum(result.status == FAIL for result in profile_results)
+                ),
+                "errors": str(
+                    sum(result.status == BROKEN for result in profile_results)
+                ),
+                "time": (
+                    f"{sum(result.duration_ms for result in profile_results) / 1000:.6f}"
+                ),
+            },
+        )
+        properties = ET.SubElement(suite, "properties")
+        ET.SubElement(
+            properties, "property", {"name": "model", "value": _safe_model(config)}
+        )
+        ET.SubElement(
+            properties,
+            "property",
+            {"name": "endpoint", "value": _safe_endpoint(config)},
+        )
+        for result in profile_results:
+            case = ET.SubElement(
+                suite,
+                "testcase",
+                {
+                    "classname": f"openagent-compat-lab.{profile}",
+                    "name": result.name,
+                    "time": f"{result.duration_ms / 1000:.6f}",
+                },
+            )
+            if result.status == FAIL:
+                failure = ET.SubElement(
+                    case,
+                    "failure",
+                    {"message": result.detail or "compatibility assertion failed"},
+                )
+                failure.text = result.detail
+            elif result.status == BROKEN:
+                error = ET.SubElement(
+                    case,
+                    "error",
+                    {"message": result.detail or "compatibility check could not run"},
+                )
+                error.text = result.detail
+
+    path = Path(junit_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tree = ET.ElementTree(root)
+    ET.indent(tree, space="  ")
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+
+
 def report_agent(
     config: Config,
     profile: str,
     *,
     as_json: bool = False,
     markdown_path: str | None = None,
+    junit_path: str | None = None,
 ) -> int:
     results = run_agent_checks(config, profile)
     payload = {
@@ -583,6 +659,8 @@ def report_agent(
         path = Path(markdown_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_markdown(config, profile, results), encoding="utf-8")
+    if junit_path:
+        _write_junit(config, {profile: results}, junit_path)
 
     if as_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -605,6 +683,8 @@ def report_agent(
         )
         if markdown_path:
             print(f"  markdown: {markdown_path}")
+        if junit_path:
+            print(f"  junit:    {junit_path}")
     return 1 if any(result.status in {FAIL, BROKEN} for result in results) else 0
 
 
@@ -613,6 +693,7 @@ def report_agent_matrix(
     *,
     as_json: bool = False,
     markdown_path: str | None = None,
+    junit_path: str | None = None,
 ) -> int:
     runs = run_agent_matrix(config)
     rows = []
@@ -635,6 +716,8 @@ def report_agent_matrix(
         path = Path(markdown_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_matrix_markdown(config, runs), encoding="utf-8")
+    if junit_path:
+        _write_junit(config, runs, junit_path)
 
     if as_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -652,4 +735,6 @@ def report_agent_matrix(
             )
         if markdown_path:
             print(f"\n  markdown: {markdown_path}")
+        if junit_path:
+            print(f"\n  junit: {junit_path}")
     return 1 if any(not row["compatible"] for row in rows) else 0
