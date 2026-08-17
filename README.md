@@ -1,5 +1,7 @@
 # openagent-compat-lab
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Test whether an “OpenAI-compatible” endpoint actually works with Codex,
 Hermes Agent, and OpenClaw before you trust it with a real task.**
 
