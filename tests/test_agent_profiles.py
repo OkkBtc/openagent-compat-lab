@@ -271,8 +271,50 @@ def test_chat_profile_detects_missing_done(mock_endpoint):
     _MockHandler.chat_done = False
     results = run_agent_checks(_config(base_url), "hermes")
     stream = next(result for result in results if result.name == "chat_stream_done")
+    assert len(results) == 8
     assert stream.status == FAIL
     assert "[DONE]" in stream.detail
+
+
+def test_fail_fast_stops_after_first_failed_check(mock_endpoint):
+    base_url, _ = mock_endpoint
+    _MockHandler.chat_done = False
+
+    results = run_agent_checks(_config(base_url), "hermes", fail_fast=True)
+
+    assert [result.name for result in results] == [
+        "models_auth_and_target",
+        "chat_basic",
+        "chat_stream_done",
+    ]
+    assert results[-1].status == FAIL
+
+
+def test_cli_fail_fast_stops_later_profiles(mock_endpoint, monkeypatch, capsys):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    _MockHandler.required_key = "different-secret"
+
+    status = main(
+        [
+            "--profile",
+            "all",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--fail-fast",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert payload["fail_fast"] is True
+    assert list(payload["profiles"]) == ["codex"]
+    assert payload["profiles"]["codex"]["checks"][-1]["name"] == (
+        "models_auth_and_target"
+    )
 
 
 def test_cli_writes_json_and_markdown(mock_endpoint, monkeypatch, capsys, tmp_path):

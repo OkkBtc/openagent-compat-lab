@@ -22,7 +22,7 @@ _PROFILES = ["generic", "codex", "hermes", "openclaw", "all", "model"]
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-compat",
-        description="Test whether an OpenAI-style endpoint works with coding agents.",
+        description="Probe selected OpenAI-style protocol paths used by coding agents.",
     )
     parser.add_argument(
         "--profile",
@@ -42,6 +42,11 @@ def _parser() -> argparse.ArgumentParser:
         help="allow an empty API key for local Ollama or mock endpoints",
     )
     parser.add_argument("--json", action="store_true", help="emit JSON to stdout")
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="stop agent-profile probes after the first failed or broken check",
+    )
     parser.add_argument(
         "--markdown", metavar="PATH", help="also write an agent-profile Markdown report"
     )
@@ -126,8 +131,11 @@ def main(argv=None) -> int:
             as_json=args.json,
             markdown_path=args.markdown,
             junit_path=args.junit,
+            fail_fast=args.fail_fast,
         )
 
+    if args.fail_fast:
+        parser.error("--fail-fast is currently available for agent profiles only")
     if args.markdown:
         parser.error("--markdown is currently available for agent profiles only")
     capability = None

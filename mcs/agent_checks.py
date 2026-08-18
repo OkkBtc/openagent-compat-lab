@@ -458,20 +458,33 @@ def _run_one(
     return Result(name, PASS, "", round((time.perf_counter() - started) * 1000, 1))
 
 
-def run_agent_checks(config: Config, profile: str) -> list[Result]:
+def run_agent_checks(
+    config: Config, profile: str, *, fail_fast: bool = False
+) -> list[Result]:
     """Run deterministic protocol checks for one agent profile."""
     if profile not in AGENT_PROFILES:
         raise ValueError(f"unknown agent profile: {profile}")
     client = ChatClient(config)
-    return [
-        _run_one(profile, name, check, client)
-        for name, check in _PROFILE_CHECKS[profile]
-    ]
+    results = []
+    for name, check in _PROFILE_CHECKS[profile]:
+        result = _run_one(profile, name, check, client)
+        results.append(result)
+        if fail_fast and result.status in {FAIL, BROKEN}:
+            break
+    return results
 
 
-def run_agent_matrix(config: Config) -> dict[str, list[Result]]:
+def run_agent_matrix(
+    config: Config, *, fail_fast: bool = False
+) -> dict[str, list[Result]]:
     """Run the three named-agent profiles in stable display order."""
-    return {profile: run_agent_checks(config, profile) for profile in MATRIX_PROFILES}
+    runs = {}
+    for profile in MATRIX_PROFILES:
+        results = run_agent_checks(config, profile, fail_fast=fail_fast)
+        runs[profile] = results
+        if fail_fast and any(result.status in {FAIL, BROKEN} for result in results):
+            break
+    return runs
 
 
 def _safe_endpoint(config: Config) -> str:
@@ -534,12 +547,12 @@ def _matrix_markdown(config: Config, runs: dict[str, list[Result]]) -> str:
         f"- Model: `{_safe_model(config)}`",
         f"- Endpoint: `{_safe_endpoint(config)}`",
         "",
-        "| Profile | API path | Passed | Failed/broken | Time | Verdict |",
+        "| Profile | API path | Passed | Failed/broken | Time | Profile result |",
         "|---|---|---:|---:|---:|---|",
     ]
     for profile, results in runs.items():
         summary = _summary(results)
-        verdict = "COMPATIBLE" if summary["compatible"] else "INCOMPATIBLE"
+        verdict = "PASSED" if summary["compatible"] else "FAILED"
         lines.append(
             f"| `{profile}` | {paths[profile]} | {summary['passed']}/"
             f"{summary['total']} | {summary['failed_or_broken']} | "
@@ -646,12 +659,14 @@ def report_agent(
     as_json: bool = False,
     markdown_path: str | None = None,
     junit_path: str | None = None,
+    fail_fast: bool = False,
 ) -> int:
-    results = run_agent_checks(config, profile)
+    results = run_agent_checks(config, profile, fail_fast=fail_fast)
     payload = {
         "profile": profile,
         "model": _safe_model(config),
         "api_base": _safe_endpoint(config),
+        "fail_fast": fail_fast,
         "summary": _summary(results),
         "checks": [result.__dict__ for result in results],
     }
@@ -694,8 +709,9 @@ def report_agent_matrix(
     as_json: bool = False,
     markdown_path: str | None = None,
     junit_path: str | None = None,
+    fail_fast: bool = False,
 ) -> int:
-    runs = run_agent_matrix(config)
+    runs = run_agent_matrix(config, fail_fast=fail_fast)
     rows = []
     for profile, results in runs.items():
         rows.append({"profile": profile, **_summary(results)})
@@ -703,6 +719,7 @@ def report_agent_matrix(
         "profile": "all",
         "model": _safe_model(config),
         "api_base": _safe_endpoint(config),
+        "fail_fast": fail_fast,
         "matrix": rows,
         "profiles": {
             profile: {
@@ -724,10 +741,10 @@ def report_agent_matrix(
     else:
         print(f"Agent compatibility matrix for {_safe_model(config)}")
         print(f"  endpoint: {_safe_endpoint(config)}\n")
-        print("  profile    passed  failed  duration     verdict")
+        print("  profile    passed  failed  duration       result")
         print("  ---------- ------- ------- ------------ ----------")
         for row in rows:
-            verdict = "compatible" if row["compatible"] else "incompatible"
+            verdict = "passed" if row["compatible"] else "failed"
             print(
                 f"  {row['profile']:<10} {row['passed']:>3}/{row['total']:<3} "
                 f"{row['failed_or_broken']:>7} {row['duration_ms']:>8.1f} ms "

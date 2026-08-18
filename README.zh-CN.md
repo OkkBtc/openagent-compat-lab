@@ -2,22 +2,24 @@
 
 [English](README.md) | 简体中文
 
-**在把真实任务交给 Codex、Hermes Agent 或 OpenClaw 之前，先检测一个
-“OpenAI 兼容”接口是否真的兼容。**
+**在把接口接入 Agent 工作流之前，先探测 Codex、Hermes Agent 和 OpenClaw
+常用的 OpenAI 风格协议路径。**
 
 openagent-compat-lab 会从你的电脑发起一组小型、确定性的协议检测，并输出兼容性
-矩阵、JSON 或可分享的 Markdown 报告。它检测的是协议行为，不是模型能力排名；
+矩阵、JSON 或便于审查的 Markdown 报告。它检测的是协议行为，不是模型能力排名；
 只要缺少必要行为，命令就会以非零状态退出。
+
+示例输出：
 
 ```text
 Agent compatibility matrix for provider/model-name
   endpoint: https://provider.example/v1
 
-  profile    passed  failed  duration     verdict
+  profile    passed  failed  duration       result
   ---------- ------- ------- ------------ ----------
-  codex       8/8          0   1842.6 ms   compatible
-  hermes      8/8          0   1604.1 ms   compatible
-  openclaw    8/8          0   1719.8 ms   compatible
+  codex       8/8          0   1842.6 ms   passed
+  hermes      8/8          0   1604.1 ms   passed
+  openclaw    8/8          0   1719.8 ms   passed
 ```
 
 ## 为什么需要它
@@ -48,6 +50,7 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 - 按索引和 ID 重组流式并行工具调用；
 - 一条命令生成三类 Agent 兼容性矩阵；
 - 每项检测耗时，以及 JSON、Markdown 和 JUnit 证据报告；
+- 可选的快速失败模式，用于控制接口调用成本和 CI 等待时间；
 - 凭据脱敏、显式无认证模式和离线回归测试。
 
 ## 检测配置
@@ -68,7 +71,8 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 内联图片。
 
 检测通过只表示这些路径在检测当时正常工作，不代表回答质量、该 Agent 的全部功能、
-供应商可用性或生产环境安全已经获得认证。
+供应商可用性或生产环境安全已经获得认证。这些配置不会启动对应客户端，也不验证其
+端到端配置、认证流程或真实任务表现。
 
 ## 快速开始
 
@@ -126,6 +130,19 @@ agent-compat \
 除非显式传入 `--allow-no-auth`，空密钥会被拒绝。这样可以在发出请求之前发现常见的
 配置错误。
 
+如果首次协议断言失败或发生运行错误后就无需继续，可以启用快速失败：
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --fail-fast
+```
+
+与 `--profile all` 一起使用时，某个配置停止后还会跳过后续配置。在早期失败已经足以
+判定本次运行不可用时，这可以减少付费请求和 CI 等待。该选项只用于 Agent 配置，
+不适用于继承的 `model` 套件。
+
 ## 报告与 CI
 
 输出机器可读的 JSON：
@@ -148,6 +165,8 @@ agent-compat --profile all \
   --model "$MODEL" \
   --markdown compat-report.md
 ```
+
+报告可能包含供应商/模型标识和响应详情；分享到团队以外之前仍需人工检查和脱敏。
 
 为 GitHub Actions、GitLab、Jenkins 或其他 CI 测试报告查看器写入标准 JUnit XML：
 
@@ -199,7 +218,8 @@ Authorization 值、URL 用户信息和常见密钥查询参数都会被脱敏�
 - API Key 从环境变量读取，Authorization 请求头不会写入通信记录。
 - 项目不会自动重试，因此失败不会被静默隐藏，也不会意外为同一检测重复计费。
 - 一次成功的 `all` 检测会发起 26 个 HTTP 请求：23 次小型模型生成和 3 次
-  `/models` 读取。某项往返失败后，该项后续请求可能提前停止。
+  `/models` 读取。某项往返失败后，该项后续请求可能提前停止；`--fail-fast` 还会
+  跳过后续检测，并在 `all` 模式下跳过后续配置。
 - 提示词、虚构工具 Schema/结果以及一张极小的内联测试图片会发送给供应商。请先
   查看该供应商的数据保留与隐私条款。
 - 供应商可能对每次生成收费。在 CI 中重复运行矩阵前，请先检查当前价格和限流规则。
@@ -277,3 +297,6 @@ openagent-compat-lab 衍生自
 项目保留了上游 Apache-2.0 许可证和通知。Agent 专用配置、有状态工具往返、Responses
 API 检测、兼容性矩阵、凭据脱敏、耗时统计、报告和离线协议测试均为本项目修改。
 准确的归属信息见 [NOTICE](NOTICE)。
+
+本项目是独立社区项目，与 OpenAI、Hermes Agent、OpenClaw 或上游维护者不存在关联，
+也未获得其背书。
