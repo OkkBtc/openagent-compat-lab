@@ -2,23 +2,25 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Test whether an “OpenAI-compatible” endpoint actually works with Codex,
-Hermes Agent, and OpenClaw before you trust it with a real task.**
+**Probe the OpenAI-style protocol paths commonly used by Codex, Hermes Agent,
+and OpenClaw before connecting an endpoint to an agent workflow.**
 
 openagent-compat-lab runs a small, deterministic protocol test from your machine
-and returns a compatibility matrix, JSON, or a shareable Markdown report. It
+and returns a test matrix, JSON, or a reviewable Markdown report. It
 checks wire behavior—not benchmark quality—and exits non-zero when a required
 behavior is missing.
+
+Example output:
 
 ```text
 Agent compatibility matrix for provider/model-name
   endpoint: https://provider.example/v1
 
-  profile    passed  failed  duration     verdict
+  profile    passed  failed  duration       result
   ---------- ------- ------- ------------ ----------
-  codex       8/8          0   1842.6 ms   compatible
-  hermes      8/8          0   1604.1 ms   compatible
-  openclaw    8/8          0   1719.8 ms   compatible
+  codex       8/8          0   1842.6 ms   passed
+  hermes      8/8          0   1604.1 ms   passed
+  openclaw    8/8          0   1719.8 ms   passed
 ```
 
 ## Why this exists
@@ -50,7 +52,8 @@ layer:
 - strict Chat Completions assistant/tool/assistant role ordering;
 - streamed parallel tool-call reconstruction by index and ID;
 - a one-command three-agent compatibility matrix;
-- per-check timing plus JSON and Markdown evidence reports;
+- per-check timing plus JSON, Markdown, and JUnit reports;
+- optional fail-fast runs for cost-sensitive checks and CI;
 - credential redaction, explicit no-auth mode, and offline regression tests.
 
 ## Profiles
@@ -72,6 +75,8 @@ stream termination, and a 1×1 inline image with `detail: original`.
 
 Passing means the tested paths worked at that moment. It does not certify answer
 quality, every feature of the named agent, provider uptime, or production safety.
+The profiles do not launch the named clients or verify their end-to-end setup,
+authentication, or behavior against a real task.
 
 ## Quick start
 
@@ -130,6 +135,20 @@ agent-compat \
 An empty key is rejected unless `--allow-no-auth` is explicit. This catches a
 surprisingly common configuration mistake before any request is sent.
 
+To stop after the first failed protocol assertion or runtime error:
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --fail-fast
+```
+
+With `--profile all`, fail-fast also skips the remaining profiles after one
+profile stops. This can reduce paid requests and CI wait time when an early
+failure already makes the run unusable. The option applies to agent profiles,
+not the inherited `model` suite.
+
 ## Reports and CI
 
 Print machine-readable JSON:
@@ -152,6 +171,9 @@ agent-compat --profile all \
   --model "$MODEL" \
   --markdown compat-report.md
 ```
+
+Reports may contain provider/model identifiers and response details. Review and
+redact them before sharing outside your team.
 
 Write standard JUnit XML for GitHub Actions, GitLab, Jenkins, or another CI
 test-report viewer:
@@ -212,7 +234,8 @@ should call `agent-compat`.
 - No automatic retries are performed, so a failure is not silently hidden and a
   probe is not unexpectedly billed twice.
 - A successful `all` run makes 26 HTTP requests: 23 small model generations and
-  three `/models` reads. A failing run can stop individual round trips early.
+  three `/models` reads. A failing round trip can end early; `--fail-fast` also
+  skips later checks and, for `all`, later profiles.
 - Prompts, a fake tool schema/result, and one tiny inline test image are sent to
   the provider. Review that provider's retention and privacy terms first.
 - Providers may charge for every generation. Check their current pricing and
@@ -295,3 +318,6 @@ The upstream Apache-2.0 license and notices are preserved. Agent-specific
 profiles, stateful tool round trips, Responses API probes, the compatibility
 matrix, credential redaction, timing, reports, and offline protocol tests are
 project modifications. See [NOTICE](NOTICE) for the precise attribution.
+
+This is an independent community project. It is not affiliated with or endorsed
+by OpenAI, Hermes Agent, OpenClaw, or the upstream maintainers.
