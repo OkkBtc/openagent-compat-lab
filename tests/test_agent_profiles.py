@@ -462,6 +462,40 @@ def test_cli_allows_explicit_no_auth(mock_endpoint, monkeypatch):
     assert status == 0
 
 
+def test_cli_timeout_overrides_environment(mock_endpoint, monkeypatch):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    monkeypatch.setenv("ACL_TIMEOUT", "60")
+    monkeypatch.setenv("MCS_TIMEOUT", "60")
+
+    status = main(
+        [
+            "--profile",
+            "generic",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--timeout",
+            "1.5",
+            "--json",
+        ]
+    )
+
+    assert status == 0
+    assert os.environ["ACL_TIMEOUT"] == "1.5"
+    assert os.environ["MCS_TIMEOUT"] == "1.5"
+    assert Config.from_env().timeout == 1.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_cli_rejects_invalid_timeout(value, capsys):
+    with pytest.raises(SystemExit):
+        main(["--timeout", value])
+
+    assert "finite number greater than zero" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("profile", ["hermes", "codex", "all"])
 def test_installed_console_script_end_to_end(mock_endpoint, profile):
     base_url, _ = mock_endpoint
