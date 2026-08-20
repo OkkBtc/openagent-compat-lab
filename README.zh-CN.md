@@ -51,6 +51,7 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 - 一条命令生成三类 Agent 兼容性矩阵；
 - 每项检测耗时，以及 JSON、Markdown 和 JUnit 证据报告；
 - 可选的快速失败模式，用于控制接口调用成本和 CI 等待时间；
+- 可按单次运行设置请求超时，适配慢接口和有时限的 CI 任务；
 - 凭据脱敏、显式无认证模式和离线回归测试。
 
 ## 检测配置
@@ -207,6 +208,17 @@ Authorization 值、URL 用户信息和常见密钥查询参数都会被脱敏�
 | `ACL_API_KEY` | Bearer Token；项目有意不提供命令行密钥参数 |
 | `ACL_MODEL` | 应当出现在 `GET /models` 中的准确模型 ID |
 | `ACL_TIMEOUT` | 单次请求超时秒数，默认 `60` |
+
+无需修改环境变量，也可以只覆盖本次运行的超时：
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --timeout 20
+```
+
+该值必须大于零，并分别作用于每个 HTTP 请求，而不是整个矩阵的总时长。
 
 项目仍然兼容继承套件使用的 `MCS_*` 变量和 `CSCS_SERVING_API`。旧的 `mcs` 可执行
 命令也会继续保留，但新用法应当使用 `agent-compat`。

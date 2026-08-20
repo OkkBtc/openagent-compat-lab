@@ -2,6 +2,7 @@
 
 import argparse
 import dataclasses
+import math
 import os
 import sys
 
@@ -17,6 +18,13 @@ _CAPABILITIES = [
     "perf",
 ]
 _PROFILES = ["generic", "codex", "hermes", "openclaw", "all", "model"]
+
+
+def _positive_float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result) or result <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -36,6 +44,12 @@ def _parser() -> argparse.ArgumentParser:
         help="target model id (repeat only with --profile model)",
     )
     parser.add_argument("--base-url", help="API root including /v1 when required")
+    parser.add_argument(
+        "--timeout",
+        type=_positive_float,
+        metavar="SECONDS",
+        help="per-request timeout in seconds (default: ACL_TIMEOUT or 60)",
+    )
     parser.add_argument(
         "--allow-no-auth",
         action="store_true",
@@ -94,6 +108,9 @@ def main(argv=None) -> int:
     if args.base_url:
         os.environ["ACL_API_BASE"] = args.base_url
         os.environ["MCS_API_BASE"] = args.base_url
+    if args.timeout is not None:
+        os.environ["ACL_TIMEOUT"] = str(args.timeout)
+        os.environ["MCS_TIMEOUT"] = str(args.timeout)
     if args.allow_no_auth:
         os.environ["ACL_ALLOW_NO_AUTH"] = "1"
     if args.record_dir:

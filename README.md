@@ -54,6 +54,7 @@ layer:
 - a one-command three-agent compatibility matrix;
 - per-check timing plus JSON, Markdown, and JUnit reports;
 - optional fail-fast runs for cost-sensitive checks and CI;
+- a per-request timeout override for slow endpoints and bounded CI jobs;
 - credential redaction, explicit no-auth mode, and offline regression tests.
 
 ## Profiles
@@ -220,6 +221,18 @@ probe.
 | `ACL_API_KEY` | bearer token; no CLI key flag is provided intentionally |
 | `ACL_MODEL` | exact model ID expected from `GET /models` |
 | `ACL_TIMEOUT` | per-request timeout in seconds; default `60` |
+
+Override the timeout for one run without changing the environment:
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --timeout 20
+```
+
+The value must be greater than zero and applies to each HTTP request, not the
+whole matrix.
 
 Legacy `MCS_*` variables and `CSCS_SERVING_API` remain supported for the
 inherited suite. The old `mcs` executable is retained as an alias, but new usage
