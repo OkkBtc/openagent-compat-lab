@@ -49,6 +49,7 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 - 严格的 Chat Completions assistant/tool/assistant 角色顺序；
 - 按索引和 ID 重组流式并行工具调用；
 - 一条命令生成三类 Agent 兼容性矩阵；
+- 可只选择实际使用的多个配置，避免无关探测和接口调用；
 - 每项检测耗时，以及 JSON、Markdown 和 JUnit 证据报告；
 - 可选的快速失败模式，用于控制接口调用成本和 CI 等待时间；
 - 可按单次运行设置请求超时，适配慢接口和有时限的 CI 任务；
@@ -118,6 +119,20 @@ agent-compat --profile openclaw \
   --model "$MODEL"
 ```
 
+如果工作流只使用部分 Agent，可以重复传入 `--profile`，并按指定顺序生成更小的
+兼容性矩阵：
+
+```bash
+agent-compat \
+  --profile codex \
+  --profile hermes \
+  --base-url "$BASE_URL" \
+  --model "$MODEL"
+```
+
+选择性矩阵同样支持控制台、JSON、Markdown、JUnit 和快速失败输出。`all`、`model`
+不能与其他配置混用，重复的配置值也会被拒绝。
+
 检测明确不使用 Bearer Token 的本地接口：
 
 ```bash
@@ -140,9 +155,9 @@ agent-compat --profile all \
   --fail-fast
 ```
 
-与 `--profile all` 一起使用时，某个配置停止后还会跳过后续配置。在早期失败已经足以
-判定本次运行不可用时，这可以减少付费请求和 CI 等待。该选项只用于 Agent 配置，
-不适用于继承的 `model` 套件。
+使用 `--profile all` 或重复配置的选择性矩阵时，某个配置停止后还会跳过后续配置。
+在早期失败已经足以判定本次运行不可用时，这可以减少付费请求和 CI 等待。该选项只
+用于 Agent 配置，不适用于继承的 `model` 套件。
 
 ## 报告与 CI
 

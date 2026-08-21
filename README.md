@@ -52,6 +52,7 @@ layer:
 - strict Chat Completions assistant/tool/assistant role ordering;
 - streamed parallel tool-call reconstruction by index and ID;
 - a one-command three-agent compatibility matrix;
+- selected-profile matrices that avoid unrelated probes and API usage;
 - per-check timing plus JSON, Markdown, and JUnit reports;
 - optional fail-fast runs for cost-sensitive checks and CI;
 - a per-request timeout override for slow endpoints and bounded CI jobs;
@@ -123,6 +124,21 @@ agent-compat --profile openclaw \
   --model "$MODEL"
 ```
 
+When a workflow uses only some named agents, repeat `--profile` to run a smaller
+matrix in the requested order:
+
+```bash
+agent-compat \
+  --profile codex \
+  --profile hermes \
+  --base-url "$BASE_URL" \
+  --model "$MODEL"
+```
+
+This selected matrix supports the same console, JSON, Markdown, JUnit, and
+fail-fast outputs as `--profile all`. `all` and `model` cannot be combined with
+other profile values, and duplicate profile values are rejected.
+
 For a local endpoint that intentionally has no bearer token:
 
 ```bash
@@ -145,10 +161,10 @@ agent-compat --profile all \
   --fail-fast
 ```
 
-With `--profile all`, fail-fast also skips the remaining profiles after one
-profile stops. This can reduce paid requests and CI wait time when an early
-failure already makes the run unusable. The option applies to agent profiles,
-not the inherited `model` suite.
+With `--profile all` or a repeated-profile selection, fail-fast also skips the
+remaining profiles after one profile stops. This can reduce paid requests and
+CI wait time when an early failure already makes the run unusable. The option
+applies to agent profiles, not the inherited `model` suite.
 
 ## Reports and CI
 

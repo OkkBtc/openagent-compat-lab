@@ -35,8 +35,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--profile",
         choices=_PROFILES,
-        default="generic",
-        help="client path to test (default: generic Chat Completions)",
+        action="append",
+        help=(
+            "client path to test; repeat named profiles for a selected matrix "
+            "(default: generic Chat Completions)"
+        ),
     )
     parser.add_argument(
         "--model",
@@ -99,8 +102,18 @@ def main(argv=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
 
+    profiles = args.profile or ["generic"]
+    duplicates = [profile for profile in profiles if profiles.count(profile) > 1]
+    if duplicates:
+        parser.error(f"duplicate --profile: {duplicates[0]}")
+    if len(profiles) > 1 and any(profile in {"all", "model"} for profile in profiles):
+        parser.error(
+            "--profile all and --profile model cannot be combined with other profiles"
+        )
+    profile = profiles[0]
+
     models = args.model or []
-    if args.profile != "model" and len(models) > 1:
+    if profile != "model" and len(models) > 1:
         parser.error("repeated --model is supported only with --profile model")
     if len(models) == 1:
         os.environ["ACL_MODEL"] = models[0]
@@ -135,21 +148,22 @@ def main(argv=None) -> int:
             "no API key (set ACL_API_KEY, or use --allow-no-auth for a local endpoint)"
         )
 
-    if args.profile != "model":
+    if profile != "model":
         if args.capability or args.detail or args.spec != "openai":
             parser.error("--capability/--detail/--spec apply only to --profile model")
         from .agent_checks import report_agent, report_agent_matrix
 
-        report = report_agent_matrix if args.profile == "all" else report_agent
-        report_args = () if args.profile == "all" else (args.profile,)
-        return report(
-            config,
-            *report_args,
-            as_json=args.json,
-            markdown_path=args.markdown,
-            junit_path=args.junit,
-            fail_fast=args.fail_fast,
-        )
+        report_options = {
+            "as_json": args.json,
+            "markdown_path": args.markdown,
+            "junit_path": args.junit,
+            "fail_fast": args.fail_fast,
+        }
+        if profile == "all":
+            return report_agent_matrix(config, **report_options)
+        if len(profiles) > 1:
+            return report_agent_matrix(config, profiles, **report_options)
+        return report_agent(config, profile, **report_options)
 
     if args.fail_fast:
         parser.error("--fail-fast is currently available for agent profiles only")

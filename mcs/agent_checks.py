@@ -6,7 +6,7 @@ import json
 import os
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from . import recording
@@ -475,11 +475,20 @@ def run_agent_checks(
 
 
 def run_agent_matrix(
-    config: Config, *, fail_fast: bool = False
+    config: Config,
+    profiles: Sequence[str] = MATRIX_PROFILES,
+    *,
+    fail_fast: bool = False,
 ) -> dict[str, list[Result]]:
-    """Run the three named-agent profiles in stable display order."""
+    """Run selected agent profiles in the supplied order."""
+    if not profiles:
+        raise ValueError("at least one agent profile is required")
+    if len(profiles) != len(set(profiles)):
+        raise ValueError("agent profiles must not contain duplicates")
     runs = {}
-    for profile in MATRIX_PROFILES:
+    for profile in profiles:
+        if profile not in AGENT_PROFILES:
+            raise ValueError(f"unknown agent profile: {profile}")
         results = run_agent_checks(config, profile, fail_fast=fail_fast)
         runs[profile] = results
         if fail_fast and any(result.status in {FAIL, BROKEN} for result in results):
@@ -540,6 +549,7 @@ def _matrix_markdown(config: Config, runs: dict[str, list[Result]]) -> str:
         "codex": "Responses API",
         "hermes": "Chat Completions",
         "openclaw": "Chat Completions stream",
+        "generic": "Chat Completions",
     }
     lines = [
         "# openagent-compat-lab matrix",
@@ -705,18 +715,21 @@ def report_agent(
 
 def report_agent_matrix(
     config: Config,
+    profiles: Sequence[str] | None = None,
     *,
     as_json: bool = False,
     markdown_path: str | None = None,
     junit_path: str | None = None,
     fail_fast: bool = False,
 ) -> int:
-    runs = run_agent_matrix(config, fail_fast=fail_fast)
+    selected = profiles is not None
+    profiles = MATRIX_PROFILES if profiles is None else profiles
+    runs = run_agent_matrix(config, profiles, fail_fast=fail_fast)
     rows = []
     for profile, results in runs.items():
         rows.append({"profile": profile, **_summary(results)})
     payload = {
-        "profile": "all",
+        "profile": "selected" if selected else "all",
         "model": _safe_model(config),
         "api_base": _safe_endpoint(config),
         "fail_fast": fail_fast,
