@@ -266,6 +266,16 @@ def test_agent_matrix_runs_named_profiles(mock_endpoint):
     )
 
 
+def test_agent_matrix_runs_only_selected_profiles(mock_endpoint):
+    base_url, _ = mock_endpoint
+    matrix = run_agent_matrix(_config(base_url), ["hermes", "codex"])
+
+    assert list(matrix) == ["hermes", "codex"]
+    assert all(
+        result.status == PASS for results in matrix.values() for result in results
+    )
+
+
 def test_chat_profile_detects_missing_done(mock_endpoint):
     base_url, _ = mock_endpoint
     _MockHandler.chat_done = False
@@ -375,6 +385,64 @@ def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_p
     assert "openagent-compat-lab matrix" in markdown
     assert "responses_tool_result_roundtrip" in markdown
     assert "openclaw_streamed_parallel_tools" in markdown
+
+
+def test_cli_writes_selected_profile_matrix(
+    mock_endpoint, monkeypatch, capsys, tmp_path
+):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    markdown_report = tmp_path / "selected.md"
+    junit_report = tmp_path / "selected.xml"
+
+    status = main(
+        [
+            "--profile",
+            "codex",
+            "--profile",
+            "hermes",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--json",
+            "--markdown",
+            str(markdown_report),
+            "--junit",
+            str(junit_report),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert payload["profile"] == "selected"
+    assert [row["profile"] for row in payload["matrix"]] == ["codex", "hermes"]
+    assert list(payload["profiles"]) == ["codex", "hermes"]
+    markdown = markdown_report.read_text()
+    assert "## codex" in markdown
+    assert "## hermes" in markdown
+    assert "openclaw" not in markdown
+    assert [
+        suite.attrib["name"] for suite in ET.parse(junit_report).findall("testsuite")
+    ] == [
+        "openagent-compat-lab.codex",
+        "openagent-compat-lab.hermes",
+    ]
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    [
+        ["--profile", "codex", "--profile", "codex"],
+        ["--profile", "all", "--profile", "hermes"],
+        ["--profile", "model", "--profile", "codex"],
+    ],
+)
+def test_cli_rejects_ambiguous_profile_combinations(profiles, capsys):
+    with pytest.raises(SystemExit):
+        main(profiles)
+
+    assert "--profile" in capsys.readouterr().err
 
 
 def test_cli_writes_agent_matrix_junit(mock_endpoint, monkeypatch, tmp_path):
