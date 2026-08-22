@@ -50,6 +50,8 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 - 按索引和 ID 重组流式并行工具调用；
 - 一条命令生成三类 Agent 兼容性矩阵；
 - 可只选择实际使用的多个配置，避免无关探测和接口调用；
+- 可在配置接口凭据前离线查看准确检测项；
+- 可输出已安装版本，便于支持和 CI 环境诊断；
 - 每项检测耗时，以及 JSON、Markdown 和 JUnit 证据报告；
 - 可选的快速失败模式，用于控制接口调用成本和 CI 等待时间；
 - 可按单次运行设置请求超时，适配慢接口和有时限的 CI 任务；
@@ -86,6 +88,7 @@ cd openagent-compat-lab
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
+agent-compat --version
 ```
 
 请把供应商密钥放在环境变量中，避免它出现在命令行参数里。如果担心 Shell 历史记录
@@ -132,6 +135,16 @@ agent-compat \
 
 选择性矩阵同样支持控制台、JSON、Markdown、JUnit 和快速失败输出。`all`、`model`
 不能与其他配置混用，重复的配置值也会被拒绝。
+
+在提供接口、模型或凭据前，先离线查看将执行的准确检测项：
+
+```bash
+agent-compat --profile codex --list-checks
+agent-compat --profile all --list-checks --json
+```
+
+该发现命令不会发送请求，也不需要接口、模型或 API Key；它只适用于 Agent 配置，
+不适用于继承的 `model` 套件。
 
 检测明确不使用 Bearer Token 的本地接口：
 
