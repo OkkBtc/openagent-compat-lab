@@ -2,9 +2,11 @@
 
 import argparse
 import dataclasses
+import json
 import math
 import os
 import sys
+from importlib.metadata import version
 
 _CAPABILITIES = [
     "core",
@@ -33,6 +35,11 @@ def _parser() -> argparse.ArgumentParser:
         description="Probe selected OpenAI-style protocol paths used by coding agents.",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {version('openagent-compat-lab')}",
+    )
+    parser.add_argument(
         "--profile",
         choices=_PROFILES,
         action="append",
@@ -59,6 +66,11 @@ def _parser() -> argparse.ArgumentParser:
         help="allow an empty API key for local Ollama or mock endpoints",
     )
     parser.add_argument("--json", action="store_true", help="emit JSON to stdout")
+    parser.add_argument(
+        "--list-checks",
+        action="store_true",
+        help="list checks for the selected agent profiles without sending requests",
+    )
     parser.add_argument(
         "--fail-fast",
         action="store_true",
@@ -115,6 +127,39 @@ def main(argv=None) -> int:
     models = args.model or []
     if profile != "model" and len(models) > 1:
         parser.error("repeated --model is supported only with --profile model")
+
+    if profile == "model":
+        if args.list_checks:
+            parser.error("--list-checks applies only to agent profiles")
+    else:
+        if args.capability or args.detail or args.spec != "openai":
+            parser.error("--capability/--detail/--spec apply only to --profile model")
+        from .agent_checks import MATRIX_PROFILES, agent_check_names
+
+        selected_profiles = list(MATRIX_PROFILES) if profile == "all" else profiles
+        checks_by_profile = {
+            selected: agent_check_names(selected) for selected in selected_profiles
+        }
+        if args.list_checks:
+            if any([args.fail_fast, args.markdown, args.junit, args.record_dir]):
+                parser.error(
+                    "--list-checks cannot be combined with run or report options"
+                )
+            if args.json:
+                print(
+                    json.dumps(
+                        {"profiles": checks_by_profile},
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                for selected, names in checks_by_profile.items():
+                    print(f"{selected}:")
+                    for name in names:
+                        print(f"  {name}")
+            return 0
+
     if len(models) == 1:
         os.environ["ACL_MODEL"] = models[0]
         os.environ["MCS_MODEL"] = models[0]
@@ -149,8 +194,6 @@ def main(argv=None) -> int:
         )
 
     if profile != "model":
-        if args.capability or args.detail or args.spec != "openai":
-            parser.error("--capability/--detail/--spec apply only to --profile model")
         from .agent_checks import report_agent, report_agent_matrix
 
         report_options = {

@@ -276,6 +276,24 @@ def test_agent_matrix_runs_only_selected_profiles(mock_endpoint):
     )
 
 
+def test_cli_lists_checks_without_endpoint(capsys):
+    status = main(["--profile", "codex", "--list-checks", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert list(payload["profiles"]) == ["codex"]
+    assert payload["profiles"]["codex"][0] == "models_auth_and_target"
+    assert payload["profiles"]["codex"][-1] == "responses_tool_result_roundtrip"
+
+
+def test_cli_reports_installed_version(capsys):
+    with pytest.raises(SystemExit) as error:
+        main(["--version"])
+
+    assert error.value.code == 0
+    assert capsys.readouterr().out == "agent-compat 0.2.0\n"
+
+
 def test_chat_profile_detects_missing_done(mock_endpoint):
     base_url, _ = mock_endpoint
     _MockHandler.chat_done = False

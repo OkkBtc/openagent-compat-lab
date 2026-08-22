@@ -425,6 +425,13 @@ _PROFILE_CHECKS = {
 }
 
 
+def agent_check_names(profile: str) -> tuple[str, ...]:
+    """Return check names for one agent profile in execution order."""
+    if profile not in AGENT_PROFILES:
+        raise ValueError(f"unknown agent profile: {profile}")
+    return tuple(name for name, _ in _PROFILE_CHECKS[profile])
+
+
 def _run_one(
     profile: str,
     name: str,

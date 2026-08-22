@@ -53,6 +53,8 @@ layer:
 - streamed parallel tool-call reconstruction by index and ID;
 - a one-command three-agent compatibility matrix;
 - selected-profile matrices that avoid unrelated probes and API usage;
+- offline check discovery before endpoint credentials are configured;
+- an installed-version command for support and CI diagnostics;
 - per-check timing plus JSON, Markdown, and JUnit reports;
 - optional fail-fast runs for cost-sensitive checks and CI;
 - a per-request timeout override for slow endpoints and bounded CI jobs;
@@ -90,6 +92,7 @@ cd openagent-compat-lab
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
+agent-compat --version
 ```
 
 Keep the provider key in an environment variable so it does not appear as a CLI
@@ -138,6 +141,17 @@ agent-compat \
 This selected matrix supports the same console, JSON, Markdown, JUnit, and
 fail-fast outputs as `--profile all`. `all` and `model` cannot be combined with
 other profile values, and duplicate profile values are rejected.
+
+List the exact checks before supplying an endpoint, model, or credential:
+
+```bash
+agent-compat --profile codex --list-checks
+agent-compat --profile all --list-checks --json
+```
+
+This discovery command does not send requests and does not require an endpoint,
+model, or API key. It applies to agent profiles, not the inherited `model`
+suite.
 
 For a local endpoint that intentionally has no bearer token:
 
