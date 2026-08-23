@@ -54,8 +54,9 @@ layer:
 - a one-command three-agent compatibility matrix;
 - selected-profile matrices that avoid unrelated probes and API usage;
 - offline check discovery before endpoint credentials are configured;
+- targeted check reruns for isolating failures without repeating a full profile;
 - an installed-version command for support and CI diagnostics;
-- per-check timing plus JSON, Markdown, and JUnit reports;
+- per-check timing plus console, JSON-file, Markdown, and JUnit reports;
 - optional fail-fast runs for cost-sensitive checks and CI;
 - a per-request timeout override for slow endpoints and bounded CI jobs;
 - credential redaction, explicit no-auth mode, and offline regression tests.
@@ -153,6 +154,22 @@ This discovery command does not send requests and does not require an endpoint,
 model, or API key. It applies to agent profiles, not the inherited `model`
 suite.
 
+After a full run identifies a failure, rerun only the relevant checks:
+
+```bash
+agent-compat --profile codex \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --check responses_basic \
+  --check responses_tool_result_roundtrip
+```
+
+`--check` is repeatable and preserves the supplied order. It requires exactly
+one named agent profile, rejects unknown or duplicate names, and does not apply
+to matrices or the inherited `model` suite. JSON reports include
+`selected_checks`, while Markdown and console reports label the partial scope;
+the exit status covers only the selected checks.
+
 For a local endpoint that intentionally has no bearer token:
 
 ```bash
@@ -193,6 +210,20 @@ agent-compat --profile all \
 
 The JSON contains a matrix summary, every check's status and failure detail, and
 `duration_ms` at both check and profile level.
+
+To keep the readable console summary and also save the same machine-readable
+payload, write JSON directly to a file:
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --json-output compat.json
+```
+
+Parent directories are created when needed. `--json` still controls stdout, so
+it can be combined with `--json-output` when both destinations should receive
+JSON.
 
 Write a Markdown report while keeping the console matrix:
 

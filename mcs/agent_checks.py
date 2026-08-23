@@ -466,14 +466,29 @@ def _run_one(
 
 
 def run_agent_checks(
-    config: Config, profile: str, *, fail_fast: bool = False
+    config: Config,
+    profile: str,
+    *,
+    check_names: Sequence[str] | None = None,
+    fail_fast: bool = False,
 ) -> list[Result]:
     """Run deterministic protocol checks for one agent profile."""
     if profile not in AGENT_PROFILES:
         raise ValueError(f"unknown agent profile: {profile}")
+    checks = _PROFILE_CHECKS[profile]
+    if check_names is not None:
+        if not check_names:
+            raise ValueError("at least one check name is required")
+        if len(check_names) != len(set(check_names)):
+            raise ValueError("check names must not contain duplicates")
+        available = dict(checks)
+        unknown = [name for name in check_names if name not in available]
+        if unknown:
+            raise ValueError(f"unknown check for {profile}: {unknown[0]}")
+        checks = [(name, available[name]) for name in check_names]
     client = ChatClient(config)
     results = []
-    for name, check in _PROFILE_CHECKS[profile]:
+    for name, check in checks:
         result = _run_one(profile, name, check, client)
         results.append(result)
         if fail_fast and result.status in {FAIL, BROKEN}:
@@ -523,7 +538,12 @@ def _summary(results: list[Result]) -> dict:
     }
 
 
-def _markdown(config: Config, profile: str, results: list[Result]) -> str:
+def _markdown(
+    config: Config,
+    profile: str,
+    results: list[Result],
+    check_names: Sequence[str] | None = None,
+) -> str:
     summary = _summary(results)
     lines = [
         "# openagent-compat-lab report",
@@ -531,6 +551,16 @@ def _markdown(config: Config, profile: str, results: list[Result]) -> str:
         f"- Profile: `{profile}`",
         f"- Model: `{_safe_model(config)}`",
         f"- Endpoint: `{_safe_endpoint(config)}`",
+        *(
+            [
+                (
+                    f"- Scope: **{len(check_names)} of "
+                    f"{len(agent_check_names(profile))} selected checks**"
+                )
+            ]
+            if check_names is not None
+            else []
+        ),
         (
             f"- Result: **{summary['passed']} passed, "
             f"{summary['failed_or_broken']} failed/broken**"
@@ -676,9 +706,13 @@ def report_agent(
     as_json: bool = False,
     markdown_path: str | None = None,
     junit_path: str | None = None,
+    json_path: str | None = None,
+    check_names: Sequence[str] | None = None,
     fail_fast: bool = False,
 ) -> int:
-    results = run_agent_checks(config, profile, fail_fast=fail_fast)
+    results = run_agent_checks(
+        config, profile, check_names=check_names, fail_fast=fail_fast
+    )
     payload = {
         "profile": profile,
         "model": _safe_model(config),
@@ -687,12 +721,23 @@ def report_agent(
         "summary": _summary(results),
         "checks": [result.__dict__ for result in results],
     }
+    if check_names is not None:
+        payload["selected_checks"] = list(check_names)
     if markdown_path:
         path = Path(markdown_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_markdown(config, profile, results), encoding="utf-8")
+        path.write_text(
+            _markdown(config, profile, results, check_names), encoding="utf-8"
+        )
     if junit_path:
         _write_junit(config, {profile: results}, junit_path)
+    if json_path:
+        path = Path(json_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
     if as_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -700,6 +745,11 @@ def report_agent(
         print(f"Agent compatibility checks for {_safe_model(config)}")
         print(f"  profile:  {profile}")
         print(f"  endpoint: {_safe_endpoint(config)}\n")
+        if check_names is not None:
+            print(
+                f"  scope:    {len(check_names)}/{len(agent_check_names(profile))} "
+                "selected checks\n"
+            )
         width = max(len(result.name) for result in results)
         icons = {PASS: "✔", FAIL: "✗", BROKEN: "⚠"}
         for result in results:
@@ -717,6 +767,8 @@ def report_agent(
             print(f"  markdown: {markdown_path}")
         if junit_path:
             print(f"  junit:    {junit_path}")
+        if json_path:
+            print(f"  json:     {json_path}")
     return 1 if any(result.status in {FAIL, BROKEN} for result in results) else 0
 
 
@@ -727,6 +779,7 @@ def report_agent_matrix(
     as_json: bool = False,
     markdown_path: str | None = None,
     junit_path: str | None = None,
+    json_path: str | None = None,
     fail_fast: bool = False,
 ) -> int:
     selected = profiles is not None
@@ -755,6 +808,13 @@ def report_agent_matrix(
         path.write_text(_matrix_markdown(config, runs), encoding="utf-8")
     if junit_path:
         _write_junit(config, runs, junit_path)
+    if json_path:
+        path = Path(json_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
     if as_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -774,4 +834,6 @@ def report_agent_matrix(
             print(f"\n  markdown: {markdown_path}")
         if junit_path:
             print(f"\n  junit: {junit_path}")
+        if json_path:
+            print(f"\n  json: {json_path}")
     return 1 if any(not row["compatible"] for row in rows) else 0
