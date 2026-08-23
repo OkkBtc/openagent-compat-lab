@@ -72,6 +72,12 @@ def _parser() -> argparse.ArgumentParser:
         help="list checks for the selected agent profiles without sending requests",
     )
     parser.add_argument(
+        "--check",
+        action="append",
+        metavar="NAME",
+        help="run only this check for one named agent profile; repeat to select more",
+    )
+    parser.add_argument(
         "--fail-fast",
         action="store_true",
         help="stop agent-profile probes after the first failed or broken check",
@@ -80,6 +86,11 @@ def _parser() -> argparse.ArgumentParser:
         "--markdown", metavar="PATH", help="also write an agent-profile Markdown report"
     )
     parser.add_argument("--junit", metavar="PATH", help="write a JUnit XML report")
+    parser.add_argument(
+        "--json-output",
+        metavar="PATH",
+        help="write an agent-profile JSON report without changing stdout format",
+    )
     parser.add_argument(
         "--record-responses",
         metavar="DIR",
@@ -131,6 +142,10 @@ def main(argv=None) -> int:
     if profile == "model":
         if args.list_checks:
             parser.error("--list-checks applies only to agent profiles")
+        if args.check:
+            parser.error("--check applies only to one named agent profile")
+        if args.json_output:
+            parser.error("--json-output applies only to agent profiles")
     else:
         if args.capability or args.detail or args.spec != "openai":
             parser.error("--capability/--detail/--spec apply only to --profile model")
@@ -140,8 +155,28 @@ def main(argv=None) -> int:
         checks_by_profile = {
             selected: agent_check_names(selected) for selected in selected_profiles
         }
+        if args.check:
+            if profile == "all" or len(profiles) != 1:
+                parser.error("--check requires exactly one named agent profile")
+            duplicates = [name for name in args.check if args.check.count(name) > 1]
+            if duplicates:
+                parser.error(f"duplicate --check: {duplicates[0]}")
+            unknown = [
+                name for name in args.check if name not in checks_by_profile[profile]
+            ]
+            if unknown:
+                parser.error(f"unknown check for {profile}: {unknown[0]}")
         if args.list_checks:
-            if any([args.fail_fast, args.markdown, args.junit, args.record_dir]):
+            if any(
+                [
+                    args.check,
+                    args.fail_fast,
+                    args.markdown,
+                    args.junit,
+                    args.json_output,
+                    args.record_dir,
+                ]
+            ):
                 parser.error(
                     "--list-checks cannot be combined with run or report options"
                 )
@@ -200,13 +235,14 @@ def main(argv=None) -> int:
             "as_json": args.json,
             "markdown_path": args.markdown,
             "junit_path": args.junit,
+            "json_path": args.json_output,
             "fail_fast": args.fail_fast,
         }
         if profile == "all":
             return report_agent_matrix(config, **report_options)
         if len(profiles) > 1:
             return report_agent_matrix(config, profiles, **report_options)
-        return report_agent(config, profile, **report_options)
+        return report_agent(config, profile, check_names=args.check, **report_options)
 
     if args.fail_fast:
         parser.error("--fail-fast is currently available for agent profiles only")

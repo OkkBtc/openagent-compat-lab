@@ -51,8 +51,9 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 - 一条命令生成三类 Agent 兼容性矩阵；
 - 可只选择实际使用的多个配置，避免无关探测和接口调用；
 - 可在配置接口凭据前离线查看准确检测项；
+- 可按检测项定向复测，定位失败时无需重复运行完整配置；
 - 可输出已安装版本，便于支持和 CI 环境诊断；
-- 每项检测耗时，以及 JSON、Markdown 和 JUnit 证据报告；
+- 每项检测耗时，以及控制台、JSON 文件、Markdown 和 JUnit 证据报告；
 - 可选的快速失败模式，用于控制接口调用成本和 CI 等待时间；
 - 可按单次运行设置请求超时，适配慢接口和有时限的 CI 任务；
 - 凭据脱敏、显式无认证模式和离线回归测试。
@@ -146,6 +147,21 @@ agent-compat --profile all --list-checks --json
 该发现命令不会发送请求，也不需要接口、模型或 API Key；它只适用于 Agent 配置，
 不适用于继承的 `model` 套件。
 
+完整检测发现失败后，可以只重跑相关检测项：
+
+```bash
+agent-compat --profile codex \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --check responses_basic \
+  --check responses_tool_result_roundtrip
+```
+
+`--check` 可以重复传入，并保留指定顺序。它只允许搭配一个明确的 Agent 配置；未知或
+重复名称会被拒绝，也不能用于兼容性矩阵或继承的 `model` 套件。JSON 报告会记录
+`selected_checks`，Markdown 和控制台报告会标明本次只检测了部分范围；退出状态也只
+反映所选检测项。
+
 检测明确不使用 Bearer Token 的本地接口：
 
 ```bash
@@ -185,6 +201,18 @@ agent-compat --profile all \
 
 JSON 包含矩阵汇总、每项检测的状态和失败详情，以及检测项和配置级别的
 `duration_ms`。
+
+如需保留易读的控制台摘要，同时将相同的机器可读结果直接写入文件：
+
+```bash
+agent-compat --profile all \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --json-output compat.json
+```
+
+需要时会自动创建父目录。`--json` 仍只控制标准输出，因此也可以和
+`--json-output` 一起使用，让两个位置都获得 JSON。
 
 保留控制台矩阵，同时写入 Markdown 报告：
 

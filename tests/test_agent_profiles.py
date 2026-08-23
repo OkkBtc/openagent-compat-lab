@@ -286,6 +286,88 @@ def test_cli_lists_checks_without_endpoint(capsys):
     assert payload["profiles"]["codex"][-1] == "responses_tool_result_roundtrip"
 
 
+def test_agent_profile_can_run_selected_checks_in_requested_order(mock_endpoint):
+    base_url, _ = mock_endpoint
+
+    results = run_agent_checks(
+        _config(base_url),
+        "hermes",
+        check_names=["chat_basic", "models_auth_and_target"],
+    )
+
+    assert [result.name for result in results] == [
+        "chat_basic",
+        "models_auth_and_target",
+    ]
+    assert all(result.status == PASS for result in results)
+
+
+def test_cli_selected_checks_are_explicit_in_reports(
+    mock_endpoint, monkeypatch, capsys, tmp_path
+):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    markdown = tmp_path / "selected.md"
+
+    status = main(
+        [
+            "--profile",
+            "codex",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--check",
+            "responses_basic",
+            "--check",
+            "models_auth_and_target",
+            "--json",
+            "--markdown",
+            str(markdown),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert payload["selected_checks"] == [
+        "responses_basic",
+        "models_auth_and_target",
+    ]
+    assert [check["name"] for check in payload["checks"]] == payload["selected_checks"]
+    assert "Scope: **2 of 8 selected checks**" in markdown.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--profile", "codex", "--check", "missing"],
+        [
+            "--profile",
+            "codex",
+            "--check",
+            "responses_basic",
+            "--check",
+            "responses_basic",
+        ],
+        ["--profile", "all", "--check", "models_auth_and_target"],
+        [
+            "--profile",
+            "codex",
+            "--profile",
+            "hermes",
+            "--check",
+            "models_auth_and_target",
+        ],
+    ],
+)
+def test_cli_rejects_invalid_check_selections(arguments, capsys):
+    with pytest.raises(SystemExit):
+        main(arguments)
+
+    error = capsys.readouterr().err
+    assert "--check" in error or "unknown check" in error
+
+
 def test_cli_reports_installed_version(capsys):
     with pytest.raises(SystemExit) as error:
         main(["--version"])
@@ -374,10 +456,40 @@ def test_cli_writes_json_and_markdown(mock_endpoint, monkeypatch, capsys, tmp_pa
     assert "duration_ms" in payload["checks"][0]
 
 
+def test_cli_writes_json_report_without_changing_stdout(
+    mock_endpoint, monkeypatch, capsys, tmp_path
+):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+    report = tmp_path / "reports" / "compat.json"
+
+    status = main(
+        [
+            "--profile",
+            "generic",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--json-output",
+            str(report),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert status == 0
+    assert "Agent compatibility checks" in output
+    assert f"json:     {report}" in output
+    assert payload["profile"] == "generic"
+    assert payload["summary"]["compatible"] is True
+
+
 def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_path):
     base_url, _ = mock_endpoint
     monkeypatch.setenv("ACL_API_KEY", "test-secret")
     report = tmp_path / "matrix.md"
+    json_report = tmp_path / "matrix.json"
     status = main(
         [
             "--profile",
@@ -389,6 +501,8 @@ def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_p
             "--json",
             "--markdown",
             str(report),
+            "--json-output",
+            str(json_report),
         ]
     )
     payload = json.loads(capsys.readouterr().out)
@@ -399,6 +513,7 @@ def test_cli_writes_all_profile_matrix(mock_endpoint, monkeypatch, capsys, tmp_p
         "openclaw",
     ]
     assert all(row["compatible"] for row in payload["matrix"])
+    assert json.loads(json_report.read_text(encoding="utf-8")) == payload
     markdown = report.read_text()
     assert "openagent-compat-lab matrix" in markdown
     assert "responses_tool_result_roundtrip" in markdown
