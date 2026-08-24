@@ -54,6 +54,7 @@ layer:
 - a one-command three-agent compatibility matrix;
 - selected-profile matrices that avoid unrelated probes and API usage;
 - offline check discovery before endpoint credentials are configured;
+- a redacted effective-configuration preview that sends no endpoint requests;
 - targeted check reruns for isolating failures without repeating a full profile;
 - an installed-version command for support and CI diagnostics;
 - per-check timing plus console, JSON-file, Markdown, and JUnit reports;
@@ -153,6 +154,23 @@ agent-compat --profile all --list-checks --json
 This discovery command does not send requests and does not require an endpoint,
 model, or API key. It applies to agent profiles, not the inherited `model`
 suite.
+
+Preview the resolved configuration and exact request plan before using provider
+quota:
+
+```bash
+agent-compat --profile codex \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --timeout 30 \
+  --show-config --json
+```
+
+`--show-config` resolves the same CLI flags and environment variables as a real
+agent-profile run, then reports the redacted endpoint, model, timeout, whether
+authentication is configured, and checks grouped by profile. It sends no HTTP
+requests and never prints the API key. Targeted `--check` selections are
+reflected in the plan; run/report outputs cannot be combined with this preview.
 
 After a full run identifies a failure, rerun only the relevant checks:
 

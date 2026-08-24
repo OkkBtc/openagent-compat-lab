@@ -286,6 +286,48 @@ def test_cli_lists_checks_without_endpoint(capsys):
     assert payload["profiles"]["codex"][-1] == "responses_tool_result_roundtrip"
 
 
+def test_cli_shows_redacted_effective_plan_without_requests(monkeypatch, capsys):
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+
+    status = main(
+        [
+            "--profile",
+            "codex",
+            "--base-url",
+            "https://example.test/v1?api_key=test-secret",
+            "--model",
+            "provider/model",
+            "--timeout",
+            "12.5",
+            "--check",
+            "responses_basic",
+            "--show-config",
+            "--json",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert status == 0
+    assert "test-secret" not in output
+    assert payload == {
+        "profile": "codex",
+        "profiles": {"codex": ["responses_basic"]},
+        "model": "provider/model",
+        "api_base": "https://example.test/v1?api_key=[REDACTED]",
+        "timeout_seconds": 12.5,
+        "auth": "configured",
+        "requests_sent": False,
+    }
+
+
+def test_cli_show_config_rejects_report_options(capsys):
+    with pytest.raises(SystemExit):
+        main(["--show-config", "--markdown", "report.md"])
+
+    assert "--show-config" in capsys.readouterr().err
+
+
 def test_agent_profile_can_run_selected_checks_in_requested_order(mock_endpoint):
     base_url, _ = mock_endpoint
 
