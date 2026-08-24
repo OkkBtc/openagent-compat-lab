@@ -72,6 +72,11 @@ def _parser() -> argparse.ArgumentParser:
         help="list checks for the selected agent profiles without sending requests",
     )
     parser.add_argument(
+        "--show-config",
+        action="store_true",
+        help="show the redacted effective agent configuration without sending requests",
+    )
+    parser.add_argument(
         "--check",
         action="append",
         metavar="NAME",
@@ -142,6 +147,8 @@ def main(argv=None) -> int:
     if profile == "model":
         if args.list_checks:
             parser.error("--list-checks applies only to agent profiles")
+        if args.show_config:
+            parser.error("--show-config applies only to agent profiles")
         if args.check:
             parser.error("--check applies only to one named agent profile")
         if args.json_output:
@@ -170,6 +177,7 @@ def main(argv=None) -> int:
             if any(
                 [
                     args.check,
+                    args.show_config,
                     args.fail_fast,
                     args.markdown,
                     args.junit,
@@ -194,6 +202,16 @@ def main(argv=None) -> int:
                     for name in names:
                         print(f"  {name}")
             return 0
+        if args.show_config and any(
+            [
+                args.fail_fast,
+                args.markdown,
+                args.junit,
+                args.json_output,
+                args.record_dir,
+            ]
+        ):
+            parser.error("--show-config cannot be combined with run or report options")
 
     if len(models) == 1:
         os.environ["ACL_MODEL"] = models[0]
@@ -227,6 +245,35 @@ def main(argv=None) -> int:
         parser.error(
             "no API key (set ACL_API_KEY, or use --allow-no-auth for a local endpoint)"
         )
+
+    if args.show_config:
+        from .redaction import redact
+
+        planned_checks = checks_by_profile
+        if args.check:
+            planned_checks = {profile: tuple(args.check)}
+        payload = {
+            "profile": ("selected" if len(profiles) > 1 else profile),
+            "profiles": planned_checks,
+            "model": redact(config.model, config.api_key),
+            "api_base": redact(config.api_base, config.api_key),
+            "timeout_seconds": config.timeout,
+            "auth": "configured" if config.api_key else "disabled",
+            "requests_sent": False,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print("Resolved agent compatibility plan")
+            print(f"  model:    {payload['model']}")
+            print(f"  endpoint: {payload['api_base']}")
+            print(f"  timeout:  {payload['timeout_seconds']} seconds")
+            print(f"  auth:     {payload['auth']}")
+            print("  checks:")
+            for selected, names in planned_checks.items():
+                print(f"    {selected}: {', '.join(names)}")
+            print("  requests: 0 (configuration only)")
+        return 0
 
     if profile != "model":
         from .agent_checks import report_agent, report_agent_matrix
