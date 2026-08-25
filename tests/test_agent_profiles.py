@@ -286,6 +286,47 @@ def test_cli_lists_checks_without_endpoint(capsys):
     assert payload["profiles"]["codex"][-1] == "responses_tool_result_roundtrip"
 
 
+def test_cli_lists_profiles_without_credentials(capsys):
+    status = main(["--list-profiles", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert payload["profiles"] == {
+        "generic": {
+            "api_path": "Chat Completions",
+            "checks": 7,
+            "included_in_all": False,
+        },
+        "codex": {
+            "api_path": "Responses API",
+            "checks": 8,
+            "included_in_all": True,
+        },
+        "hermes": {
+            "api_path": "Chat Completions",
+            "checks": 8,
+            "included_in_all": True,
+        },
+        "openclaw": {
+            "api_path": "Chat Completions stream",
+            "checks": 8,
+            "included_in_all": True,
+        },
+    }
+    assert payload["matrix_profile"] == {
+        "name": "all",
+        "profiles": ["codex", "hermes", "openclaw"],
+    }
+    assert payload["full_suite_profile"] == "model"
+
+
+def test_cli_list_profiles_rejects_run_options(capsys):
+    with pytest.raises(SystemExit):
+        main(["--list-profiles", "--profile", "codex"])
+
+    assert "--list-profiles" in capsys.readouterr().err
+
+
 def test_cli_shows_redacted_effective_plan_without_requests(monkeypatch, capsys):
     monkeypatch.setenv("ACL_API_KEY", "test-secret")
 
