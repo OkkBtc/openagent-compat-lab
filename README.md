@@ -53,6 +53,7 @@ layer:
 - streamed parallel tool-call reconstruction by index and ID;
 - a one-command three-agent compatibility matrix;
 - selected-profile matrices that avoid unrelated probes and API usage;
+- offline profile and API-path discovery for wrappers and setup tools;
 - offline check discovery before endpoint credentials are configured;
 - a redacted effective-configuration preview that sends no endpoint requests;
 - targeted check reruns for isolating failures without repeating a full profile;
@@ -143,6 +144,18 @@ agent-compat \
 This selected matrix supports the same console, JSON, Markdown, JUnit, and
 fail-fast outputs as `--profile all`. `all` and `model` cannot be combined with
 other profile values, and duplicate profile values are rejected.
+
+Discover supported run modes without configuring an endpoint or credentials:
+
+```bash
+agent-compat --list-profiles
+agent-compat --list-profiles --json
+```
+
+The output records each named Agent profile's API path, check count, and whether
+it belongs to the `all` matrix. It also identifies the `model` full-suite mode,
+so wrappers and setup UIs do not need to parse help text or hard-code the
+current profile list.
 
 List the exact checks before supplying an endpoint, model, or credential:
 

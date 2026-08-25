@@ -19,7 +19,13 @@ _CAPABILITIES = [
     "robustness",
     "perf",
 ]
-_PROFILES = ["generic", "codex", "hermes", "openclaw", "all", "model"]
+_AGENT_PROFILE_PATHS = {
+    "generic": "Chat Completions",
+    "codex": "Responses API",
+    "hermes": "Chat Completions",
+    "openclaw": "Chat Completions stream",
+}
+_PROFILES = [*_AGENT_PROFILE_PATHS, "all", "model"]
 
 
 def _positive_float(value: str) -> float:
@@ -66,6 +72,11 @@ def _parser() -> argparse.ArgumentParser:
         help="allow an empty API key for local Ollama or mock endpoints",
     )
     parser.add_argument("--json", action="store_true", help="emit JSON to stdout")
+    parser.add_argument(
+        "--list-profiles",
+        action="store_true",
+        help="list supported agent profiles and API paths without credentials",
+    )
     parser.add_argument(
         "--list-checks",
         action="store_true",
@@ -129,6 +140,37 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _parser()
     args = parser.parse_args(argv)
+
+    if args.list_profiles:
+        if any(argument not in {"--list-profiles", "--json"} for argument in argv):
+            parser.error("--list-profiles cannot be combined with other options")
+        from .agent_checks import MATRIX_PROFILES, agent_check_names
+
+        payload = {
+            "profiles": {
+                profile: {
+                    "api_path": api_path,
+                    "checks": len(agent_check_names(profile)),
+                    "included_in_all": profile in MATRIX_PROFILES,
+                }
+                for profile, api_path in _AGENT_PROFILE_PATHS.items()
+            },
+            "matrix_profile": {"name": "all", "profiles": list(MATRIX_PROFILES)},
+            "full_suite_profile": "model",
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print("Supported agent profiles")
+            for profile, details in payload["profiles"].items():
+                matrix = "; included in all" if details["included_in_all"] else ""
+                print(
+                    f"  {profile}: {details['api_path']} "
+                    f"({details['checks']} checks{matrix})"
+                )
+            print(f"  all: {', '.join(payload['matrix_profile']['profiles'])}")
+            print("  model: inherited full model compatibility suite")
+        return 0
 
     profiles = args.profile or ["generic"]
     duplicates = [profile for profile in profiles if profiles.count(profile) > 1]
