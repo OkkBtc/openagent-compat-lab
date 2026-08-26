@@ -10,7 +10,7 @@ from typing import ClassVar
 
 import pytest
 
-from mcs.agent_checks import run_agent_checks, run_agent_matrix
+from mcs.agent_checks import agent_check_names, run_agent_checks, run_agent_matrix
 from mcs.capabilities import FAIL, PASS
 from mcs.cli import main
 from mcs.client import ApiError
@@ -420,6 +420,35 @@ def test_cli_selected_checks_are_explicit_in_reports(
     assert "Scope: **2 of 8 selected checks**" in markdown.read_text(encoding="utf-8")
 
 
+def test_cli_can_skip_known_checks(mock_endpoint, monkeypatch, capsys):
+    base_url, _ = mock_endpoint
+    monkeypatch.setenv("ACL_API_KEY", "test-secret")
+
+    status = main(
+        [
+            "--profile",
+            "generic",
+            "--base-url",
+            base_url,
+            "--model",
+            "mock-model",
+            "--skip-check",
+            "chat_image_detail_original",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    expected = [
+        name
+        for name in agent_check_names("generic")
+        if name != "chat_image_detail_original"
+    ]
+    assert status == 0
+    assert payload["selected_checks"] == expected
+    assert [check["name"] for check in payload["checks"]] == expected
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -449,6 +478,57 @@ def test_cli_rejects_invalid_check_selections(arguments, capsys):
 
     error = capsys.readouterr().err
     assert "--check" in error or "unknown check" in error
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--profile", "codex", "--skip-check", "missing"],
+        [
+            "--profile",
+            "codex",
+            "--skip-check",
+            "responses_basic",
+            "--skip-check",
+            "responses_basic",
+        ],
+        ["--profile", "all", "--skip-check", "models_auth_and_target"],
+        [
+            "--profile",
+            "codex",
+            "--profile",
+            "hermes",
+            "--skip-check",
+            "models_auth_and_target",
+        ],
+        [
+            "--profile",
+            "codex",
+            "--check",
+            "responses_basic",
+            "--skip-check",
+            "models_auth_and_target",
+        ],
+        ["--list-checks", "--skip-check", "chat_basic"],
+    ],
+)
+def test_cli_rejects_invalid_skip_selections(arguments, capsys):
+    with pytest.raises(SystemExit):
+        main(arguments)
+
+    error = capsys.readouterr().err
+    assert "--skip-check" in error or "unknown check" in error
+
+
+def test_cli_rejects_skipping_every_check(capsys):
+    arguments = ["--profile", "generic"]
+    for name in agent_check_names("generic"):
+        arguments.extend(["--skip-check", name])
+
+    with pytest.raises(SystemExit):
+        main(arguments)
+
+    assert "cannot skip every check" in capsys.readouterr().err
 
 
 def test_cli_reports_installed_version(capsys):

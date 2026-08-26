@@ -57,6 +57,7 @@ layer:
 - offline check discovery before endpoint credentials are configured;
 - a redacted effective-configuration preview that sends no endpoint requests;
 - targeted check reruns for isolating failures without repeating a full profile;
+- named-check exclusions for endpoints that intentionally omit one capability;
 - an installed-version command for support and CI diagnostics;
 - per-check timing plus console, JSON-file, Markdown, and JUnit reports;
 - optional fail-fast runs for cost-sensitive checks and CI;
@@ -200,6 +201,23 @@ one named agent profile, rejects unknown or duplicate names, and does not apply
 to matrices or the inherited `model` suite. JSON reports include
 `selected_checks`, while Markdown and console reports label the partial scope;
 the exit status covers only the selected checks.
+
+When one known capability is intentionally unavailable, keep the rest of a
+named profile and skip only that check:
+
+```bash
+agent-compat --profile generic \
+  --base-url "$BASE_URL" \
+  --model "$MODEL" \
+  --skip-check chat_image_detail_original
+```
+
+`--skip-check` is repeatable and preserves the profile's original check order.
+It accepts exactly one named Agent profile, rejects unknown or duplicate names,
+cannot be combined with `--check`, and refuses to skip every check. Reports and
+`--show-config` expose the exact remaining selection, so the reduced scope is
+not hidden. Skipping a check is not evidence that the omitted capability is
+compatible.
 
 For a local endpoint that intentionally has no bearer token:
 

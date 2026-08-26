@@ -94,6 +94,12 @@ def _parser() -> argparse.ArgumentParser:
         help="run only this check for one named agent profile; repeat to select more",
     )
     parser.add_argument(
+        "--skip-check",
+        action="append",
+        metavar="NAME",
+        help="skip this check for one named agent profile; repeat to skip more",
+    )
+    parser.add_argument(
         "--fail-fast",
         action="store_true",
         help="stop agent-profile probes after the first failed or broken check",
@@ -193,6 +199,8 @@ def main(argv=None) -> int:
             parser.error("--show-config applies only to agent profiles")
         if args.check:
             parser.error("--check applies only to one named agent profile")
+        if args.skip_check:
+            parser.error("--skip-check applies only to one named agent profile")
         if args.json_output:
             parser.error("--json-output applies only to agent profiles")
     else:
@@ -204,6 +212,8 @@ def main(argv=None) -> int:
         checks_by_profile = {
             selected: agent_check_names(selected) for selected in selected_profiles
         }
+        if args.check and args.skip_check:
+            parser.error("--check and --skip-check cannot be combined")
         if args.check:
             if profile == "all" or len(profiles) != 1:
                 parser.error("--check requires exactly one named agent profile")
@@ -215,10 +225,33 @@ def main(argv=None) -> int:
             ]
             if unknown:
                 parser.error(f"unknown check for {profile}: {unknown[0]}")
+        run_check_names = args.check
+        if args.skip_check:
+            if profile == "all" or len(profiles) != 1:
+                parser.error("--skip-check requires exactly one named agent profile")
+            duplicates = [
+                name for name in args.skip_check if args.skip_check.count(name) > 1
+            ]
+            if duplicates:
+                parser.error(f"duplicate --skip-check: {duplicates[0]}")
+            unknown = [
+                name
+                for name in args.skip_check
+                if name not in checks_by_profile[profile]
+            ]
+            if unknown:
+                parser.error(f"unknown check for {profile}: {unknown[0]}")
+            skipped = set(args.skip_check)
+            run_check_names = [
+                name for name in checks_by_profile[profile] if name not in skipped
+            ]
+            if not run_check_names:
+                parser.error("--skip-check cannot skip every check")
         if args.list_checks:
             if any(
                 [
                     args.check,
+                    args.skip_check,
                     args.show_config,
                     args.fail_fast,
                     args.markdown,
@@ -292,8 +325,8 @@ def main(argv=None) -> int:
         from .redaction import redact
 
         planned_checks = checks_by_profile
-        if args.check:
-            planned_checks = {profile: tuple(args.check)}
+        if run_check_names is not None:
+            planned_checks = {profile: tuple(run_check_names)}
         payload = {
             "profile": ("selected" if len(profiles) > 1 else profile),
             "profiles": planned_checks,
@@ -331,7 +364,9 @@ def main(argv=None) -> int:
             return report_agent_matrix(config, **report_options)
         if len(profiles) > 1:
             return report_agent_matrix(config, profiles, **report_options)
-        return report_agent(config, profile, check_names=args.check, **report_options)
+        return report_agent(
+            config, profile, check_names=run_check_names, **report_options
+        )
 
     if args.fail_fast:
         parser.error("--fail-fast is currently available for agent profiles only")
