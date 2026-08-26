@@ -7,6 +7,7 @@ import math
 import os
 import sys
 from importlib.metadata import version
+from pathlib import Path
 
 _CAPABILITIES = [
     "core",
@@ -72,6 +73,12 @@ def _parser() -> argparse.ArgumentParser:
         help="allow an empty API key for local Ollama or mock endpoints",
     )
     parser.add_argument("--json", action="store_true", help="emit JSON to stdout")
+    parser.add_argument(
+        "--compare-reports",
+        nargs=2,
+        metavar=("BASELINE", "CURRENT"),
+        help="compare two JSON reports offline and fail on compatibility regressions",
+    )
     parser.add_argument(
         "--list-profiles",
         action="store_true",
@@ -177,6 +184,47 @@ def main(argv=None) -> int:
             print(f"  all: {', '.join(payload['matrix_profile']['profiles'])}")
             print("  model: inherited full model compatibility suite")
         return 0
+
+    if args.compare_reports:
+        if any(
+            [
+                args.profile,
+                args.model,
+                args.base_url,
+                args.timeout is not None,
+                args.allow_no_auth,
+                args.list_checks,
+                args.show_config,
+                args.check,
+                args.skip_check,
+                args.fail_fast,
+                args.markdown,
+                args.junit,
+                args.json_output,
+                args.record_dir,
+                args.capability,
+                args.detail,
+                args.spec != "openai",
+            ]
+        ):
+            parser.error("--compare-reports cannot be combined with run options")
+        from .report_diff import (
+            ReportFormatError,
+            compare_report_files,
+            render_report_diff,
+        )
+
+        try:
+            comparison = compare_report_files(
+                Path(args.compare_reports[0]), Path(args.compare_reports[1])
+            )
+        except ReportFormatError as error:
+            parser.error(str(error))
+        if args.json:
+            print(json.dumps(comparison, indent=2, ensure_ascii=False))
+        else:
+            print(render_report_diff(comparison), end="")
+        return int(comparison["summary"]["blocking"])
 
     profiles = args.profile or ["generic"]
     duplicates = [profile for profile in profiles if profiles.count(profile) > 1]

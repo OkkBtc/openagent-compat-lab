@@ -60,6 +60,7 @@ layer:
 - named-check exclusions for endpoints that intentionally omit one capability;
 - an installed-version command for support and CI diagnostics;
 - per-check timing plus console, JSON-file, Markdown, and JUnit reports;
+- offline regression gates for saved JSON compatibility evidence;
 - optional fail-fast runs for cost-sensitive checks and CI;
 - a per-request timeout override for slow endpoints and bounded CI jobs;
 - credential redaction, explicit no-auth mode, and offline regression tests.
@@ -273,6 +274,22 @@ agent-compat --profile all \
 Parent directories are created when needed. `--json` still controls stdout, so
 it can be combined with `--json-output` when both destinations should receive
 JSON.
+
+Compare a saved baseline with a current JSON report without configuring an
+endpoint or spending provider quota:
+
+```bash
+agent-compat --compare-reports baseline.json current.json
+agent-compat --compare-reports baseline.json current.json --json
+```
+
+The comparison supports single Agent profiles, Agent matrices, the single-model
+full suite, and multi-model JSON output. It reports regressions, recoveries,
+other non-passing status changes, added checks, removed checks, and unchanged
+coverage. Exit status `1` blocks CI when a passing check becomes non-passing, a
+previously covered check disappears, or a newly added check is failed/broken;
+invalid reports return status `2`. Target metadata is shown but not forced to
+match, so use like-for-like model and endpoint reports for a meaningful gate.
 
 Write a Markdown report while keeping the console matrix:
 
