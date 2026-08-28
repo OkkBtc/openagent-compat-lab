@@ -58,6 +58,7 @@ Shell 命令、读取你的代码仓库，也不会调用真实的订单或天�
 - 可输出已安装版本，便于支持和 CI 环境诊断；
 - 每项检测耗时，以及控制台、JSON 文件、Markdown 和 JUnit 证据报告；
 - 可离线对比已保存的 JSON 兼容性证据并设置回归门禁；
+- 可用版本化 Policy-as-Code 文件声明必须满足的兼容性契约；
 - 可选的快速失败模式，用于控制接口调用成本和 CI 等待时间；
 - 可按单次运行设置请求超时，适配慢接口和有时限的 CI 任务；
 - 凭据脱敏、显式无认证模式和离线回归测试。
@@ -270,6 +271,34 @@ agent-compat --compare-reports baseline.json current.json --json
 非通过、以前覆盖的检测消失，或者新增检测直接失败/中断时，命令返回状态 `1`，可
 直接作为 CI 门禁；报告无效时返回状态 `2`。输出会展示目标元数据，但不会强制模型
 和接口一致，因此应使用同一目标、同一口径的报告进行有意义的比较。
+
+基线对比能发现新回归，但无法让基线中原本就失败的能力恢复正常。对于发布要求，可将
+必须存在且通过的检测项保存为版本化的 Policy-as-Code 文件：
+
+```json
+{
+  "format": "agent-compat-policy",
+  "format_version": 1,
+  "requirements": [
+    {"scope": "codex", "check": "responses_tool_result_roundtrip"},
+    {"scope": "hermes", "check": "hermes_tool_result_roundtrip"},
+    {"scope": "openclaw", "check": "openclaw_streamed_parallel_tools"}
+  ]
+}
+```
+
+无需访问接口，即可对任意受支持的已保存报告执行契约门禁：
+
+```bash
+agent-compat --enforce-policy compat-policy.json current.json
+agent-compat --enforce-policy compat-policy.json current.json --json
+```
+
+每项要求默认只允许 `pass`。如果某个经过说明的环境允许跳过，可以显式设置
+`"allowed_statuses": ["pass", "skip"]`。检测项缺失或状态不在允许范围时返回 `1`；
+策略或报告格式错误时返回 `2`。策略支持与回归门禁相同的单配置、矩阵、单模型和
+多模型报告。建议把策略纳入代码审查，并与 `--compare-reports` 配合：策略定义最低
+兼容性契约，基线对比负责发现高于最低要求的意外漂移。
 
 保留控制台矩阵，同时写入 Markdown 报告：
 

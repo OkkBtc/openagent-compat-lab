@@ -80,6 +80,12 @@ def _parser() -> argparse.ArgumentParser:
         help="compare two JSON reports offline and fail on compatibility regressions",
     )
     parser.add_argument(
+        "--enforce-policy",
+        nargs=2,
+        metavar=("POLICY", "REPORT"),
+        help="enforce a versioned compatibility policy against one JSON report",
+    )
+    parser.add_argument(
         "--list-profiles",
         action="store_true",
         help="list supported agent profiles and API paths without credentials",
@@ -202,6 +208,7 @@ def main(argv=None) -> int:
                 args.junit,
                 args.json_output,
                 args.record_dir,
+                args.enforce_policy,
                 args.capability,
                 args.detail,
                 args.spec != "openai",
@@ -225,6 +232,49 @@ def main(argv=None) -> int:
         else:
             print(render_report_diff(comparison), end="")
         return int(comparison["summary"]["blocking"])
+
+    if args.enforce_policy:
+        if any(
+            [
+                args.profile,
+                args.model,
+                args.base_url,
+                args.timeout is not None,
+                args.allow_no_auth,
+                args.compare_reports,
+                args.list_checks,
+                args.show_config,
+                args.check,
+                args.skip_check,
+                args.fail_fast,
+                args.markdown,
+                args.junit,
+                args.json_output,
+                args.record_dir,
+                args.capability,
+                args.detail,
+                args.spec != "openai",
+            ]
+        ):
+            parser.error("--enforce-policy cannot be combined with run options")
+        from .report_diff import ReportFormatError
+        from .report_policy import (
+            PolicyFormatError,
+            enforce_report_policy,
+            render_policy_result,
+        )
+
+        try:
+            result = enforce_report_policy(
+                Path(args.enforce_policy[0]), Path(args.enforce_policy[1])
+            )
+        except (PolicyFormatError, ReportFormatError) as error:
+            parser.error(str(error))
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(render_policy_result(result), end="")
+        return int(result["summary"]["blocking"])
 
     profiles = args.profile or ["generic"]
     duplicates = [profile for profile in profiles if profiles.count(profile) > 1]
