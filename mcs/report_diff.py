@@ -98,6 +98,14 @@ def _metadata(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def load_report_checks(
+    path: Path,
+) -> tuple[Path, dict[str, Any], dict[CheckKey, str]]:
+    """Load one supported report and return its normalized check statuses."""
+    report_file, report = _load_report(path)
+    return report_file, report, _extract_checks(report, str(report_file))
+
+
 def _change(
     key: CheckKey,
     baseline_status: str | None,
@@ -118,10 +126,8 @@ def _change(
 
 def compare_report_files(baseline_path: Path, current_path: Path) -> dict[str, Any]:
     """Compare two report files and classify compatibility changes."""
-    baseline_file, baseline_report = _load_report(baseline_path)
-    current_file, current_report = _load_report(current_path)
-    baseline = _extract_checks(baseline_report, str(baseline_file))
-    current = _extract_checks(current_report, str(current_file))
+    baseline_file, baseline_report, baseline = load_report_checks(baseline_path)
+    current_file, current_report, current = load_report_checks(current_path)
 
     regressions = []
     recoveries = []

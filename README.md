@@ -61,6 +61,7 @@ layer:
 - an installed-version command for support and CI diagnostics;
 - per-check timing plus console, JSON-file, Markdown, and JUnit reports;
 - offline regression gates for saved JSON compatibility evidence;
+- versioned policy-as-code gates for required compatibility checks;
 - optional fail-fast runs for cost-sensitive checks and CI;
 - a per-request timeout override for slow endpoints and bounded CI jobs;
 - credential redaction, explicit no-auth mode, and offline regression tests.
@@ -290,6 +291,38 @@ coverage. Exit status `1` blocks CI when a passing check becomes non-passing, a
 previously covered check disappears, or a newly added check is failed/broken;
 invalid reports return status `2`. Target metadata is shown but not forced to
 match, so use like-for-like model and endpoint reports for a meaningful gate.
+
+A baseline comparison catches new regressions, but it cannot make an already
+failing baseline healthy. For release requirements, keep a versioned
+policy-as-code file that names the checks which must be present and pass:
+
+```json
+{
+  "format": "agent-compat-policy",
+  "format_version": 1,
+  "requirements": [
+    {"scope": "codex", "check": "responses_tool_result_roundtrip"},
+    {"scope": "hermes", "check": "hermes_tool_result_roundtrip"},
+    {"scope": "openclaw", "check": "openclaw_streamed_parallel_tools"}
+  ]
+}
+```
+
+Enforce it against any supported saved report without endpoint access:
+
+```bash
+agent-compat --enforce-policy compat-policy.json current.json
+agent-compat --enforce-policy compat-policy.json current.json --json
+```
+
+Requirements allow only `pass` by default. A requirement may explicitly set
+`"allowed_statuses": ["pass", "skip"]` when a documented environment permits
+a skip. Missing checks and disallowed statuses return `1`; malformed policies
+or reports return `2`. Policies support the same single-profile, matrix,
+single-model, and multi-model reports as the regression gate. Keep the policy
+in code review and use it alongside `--compare-reports`: the policy defines the
+minimum contract, while the baseline comparison catches unexpected drift above
+that minimum.
 
 Write a Markdown report while keeping the console matrix:
 
