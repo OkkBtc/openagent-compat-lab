@@ -62,6 +62,7 @@ layer:
 - per-check timing plus console, JSON-file, Markdown, and JUnit reports;
 - offline regression gates for saved JSON compatibility evidence;
 - versioned policy-as-code gates for required compatibility checks;
+- strict policy generation from fully passing reports for reviewable CI contracts;
 - optional fail-fast runs for cost-sensitive checks and CI;
 - a per-request timeout override for slow endpoints and bounded CI jobs;
 - credential redaction, explicit no-auth mode, and offline regression tests.
@@ -293,8 +294,18 @@ invalid reports return status `2`. Target metadata is shown but not forced to
 match, so use like-for-like model and endpoint reports for a meaningful gate.
 
 A baseline comparison catches new regressions, but it cannot make an already
-failing baseline healthy. For release requirements, keep a versioned
-policy-as-code file that names the checks which must be present and pass:
+failing baseline healthy. Generate a strict, deterministic policy from a clean
+report and review the resulting contract before committing it:
+
+```bash
+agent-compat --generate-policy passing-report.json > compat-policy.json
+```
+
+Generation is fail-closed: every check must be `pass`; a report containing
+`fail`, `broken`, or `skip` is rejected instead of silently encoding an existing
+gap. The generated policy names every observed check and allows only `pass`.
+For release requirements, keep the versioned policy-as-code file in source
+control:
 
 ```json
 {

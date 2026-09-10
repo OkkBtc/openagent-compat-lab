@@ -86,6 +86,11 @@ def _parser() -> argparse.ArgumentParser:
         help="enforce a versioned compatibility policy against one JSON report",
     )
     parser.add_argument(
+        "--generate-policy",
+        metavar="REPORT",
+        help="generate a strict pass-only policy from a fully passing JSON report",
+    )
+    parser.add_argument(
         "--list-profiles",
         action="store_true",
         help="list supported agent profiles and API paths without credentials",
@@ -209,6 +214,7 @@ def main(argv=None) -> int:
                 args.json_output,
                 args.record_dir,
                 args.enforce_policy,
+                args.generate_policy,
                 args.capability,
                 args.detail,
                 args.spec != "openai",
@@ -251,6 +257,7 @@ def main(argv=None) -> int:
                 args.junit,
                 args.json_output,
                 args.record_dir,
+                args.generate_policy,
                 args.capability,
                 args.detail,
                 args.spec != "openai",
@@ -275,6 +282,41 @@ def main(argv=None) -> int:
         else:
             print(render_policy_result(result), end="")
         return int(result["summary"]["blocking"])
+
+    if args.generate_policy:
+        if any(
+            [
+                args.profile,
+                args.model,
+                args.base_url,
+                args.timeout is not None,
+                args.allow_no_auth,
+                args.compare_reports,
+                args.enforce_policy,
+                args.list_checks,
+                args.show_config,
+                args.check,
+                args.skip_check,
+                args.fail_fast,
+                args.markdown,
+                args.junit,
+                args.json_output,
+                args.record_dir,
+                args.capability,
+                args.detail,
+                args.spec != "openai",
+            ]
+        ):
+            parser.error("--generate-policy cannot be combined with run options")
+        from .report_diff import ReportFormatError
+        from .report_policy import PolicyGenerationError, generate_policy
+
+        try:
+            policy = generate_policy(Path(args.generate_policy))
+        except (PolicyGenerationError, ReportFormatError) as error:
+            parser.error(str(error))
+        print(json.dumps(policy, indent=2, ensure_ascii=False))
+        return 0
 
     profiles = args.profile or ["generic"]
     duplicates = [profile for profile in profiles if profiles.count(profile) > 1]
