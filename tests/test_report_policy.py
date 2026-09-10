@@ -129,3 +129,55 @@ def test_policy_gate_rejects_invalid_policy_and_run_options(tmp_path, capsys):
         )
     assert error.value.code == 2
     assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_generate_policy_creates_stable_pass_only_requirements(tmp_path, capsys):
+    report = _write_json(
+        tmp_path / "passing.json",
+        {
+            "profile": "all",
+            "profiles": {
+                "hermes": {"checks": [{"name": "tool_roundtrip", "status": "pass"}]},
+                "codex": {
+                    "checks": [
+                        {"name": "responses_stream", "status": "pass"},
+                        {"name": "responses_basic", "status": "pass"},
+                    ]
+                },
+            },
+        },
+    )
+
+    assert main(["--generate-policy", str(report)]) == 0
+    assert json.loads(capsys.readouterr().out) == _policy(
+        {"scope": "codex", "check": "responses_basic"},
+        {"scope": "codex", "check": "responses_stream"},
+        {"scope": "hermes", "check": "tool_roundtrip"},
+    )
+
+
+def test_generate_policy_rejects_non_passing_report(tmp_path, capsys):
+    report = _write_json(tmp_path / "report.json", _matrix_report())
+
+    with pytest.raises(SystemExit) as error:
+        main(["--generate-policy", str(report)])
+
+    assert error.value.code == 2
+    assert "fail=1, skip=1" in capsys.readouterr().err
+
+
+def test_generate_policy_rejects_invalid_report_and_run_options(tmp_path, capsys):
+    invalid = _write_json(tmp_path / "invalid.json", {"checks": []})
+    with pytest.raises(SystemExit) as error:
+        main(["--generate-policy", str(invalid)])
+    assert error.value.code == 2
+    assert "no profile or model identifier" in capsys.readouterr().err
+
+    report = _write_json(
+        tmp_path / "passing.json",
+        {"profile": "codex", "checks": [{"name": "basic", "status": "pass"}]},
+    )
+    with pytest.raises(SystemExit) as error:
+        main(["--generate-policy", str(report), "--profile", "codex"])
+    assert error.value.code == 2
+    assert "cannot be combined" in capsys.readouterr().err

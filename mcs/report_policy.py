@@ -18,6 +18,32 @@ class PolicyFormatError(ValueError):
     """Raised when a compatibility policy is invalid."""
 
 
+class PolicyGenerationError(ValueError):
+    """Raised when a report is unsafe to promote into a strict policy."""
+
+
+def generate_policy(report_path: Path) -> dict[str, Any]:
+    """Create a deterministic pass-only policy from a fully passing report."""
+    _, _, checks = load_report_checks(report_path)
+    non_passing = [status for status in checks.values() if status != "pass"]
+    if non_passing:
+        counts = ", ".join(
+            f"{status}={non_passing.count(status)}"
+            for status in ("fail", "broken", "skip")
+            if status in non_passing
+        )
+        raise PolicyGenerationError(
+            f"cannot generate a strict policy from non-passing checks ({counts})"
+        )
+    return {
+        "format": _POLICY_FORMAT,
+        "format_version": _POLICY_VERSION,
+        "requirements": [
+            {"scope": scope, "check": check} for scope, check in sorted(checks)
+        ],
+    }
+
+
 def _load_policy(path: Path) -> tuple[Path, dict[str, Any]]:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
